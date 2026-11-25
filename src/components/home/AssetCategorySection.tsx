@@ -179,9 +179,9 @@ export const AssetCategorySection: React.FC = () => {
                   <th>Simbolo</th>
                   <th className="is-right">Prezzo</th>
                   <th className="is-right">Var %</th>
-                  <th className="is-right">Andamento</th>
-                  <th className="is-right">Volume</th>
-                  <th className="is-right">Rating tecnico</th>
+                  <th className="is-right tv-col-hide-sm">Andamento</th>
+                  <th className="is-right tv-col-hide-md">Volume</th>
+                  <th className="is-right tv-col-hide-sm">Rating tecnico</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,21 +195,21 @@ export const AssetCategorySection: React.FC = () => {
                       title={`Apri ${sym.name} su Supercharts`}
                     >
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                           <span
                             className="tv-symbol-avatar"
                             style={{ backgroundColor: sym.logoColor }}
                           >
                             {sym.logoText}
                           </span>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--tv-text-heading)' }}>
-                              <span>{sym.name}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--tv-text-heading)', minWidth: 0 }}>
+                              <span className="tv-stock-name">{sym.name}</span>
                               <SourcePill source={source} />
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                              <span className="tv-ticker-badge">{sym.ticker}</span>
-                              <span style={{ fontSize: 11, color: 'var(--tv-text-muted)' }}>
+                              <span className="tv-ticker-pill">{sym.ticker}</span>
+                              <span className="tv-stock-sector-meta" style={{ fontSize: 11, color: 'var(--tv-text-muted)' }}>
                                 {sym.sector}
                               </span>
                             </div>
@@ -217,7 +217,7 @@ export const AssetCategorySection: React.FC = () => {
                         </div>
                       </td>
 
-                      <td className="is-right tv-num">
+                      <td className="is-right tv-num" style={{ whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 700, color: 'var(--tv-text-heading)' }}>
                           {formatPrice(price, sym.precision)}
                         </span>{' '}
@@ -226,13 +226,13 @@ export const AssetCategorySection: React.FC = () => {
                         </span>
                       </td>
 
-                      <td className="is-right">
+                      <td className="is-right" style={{ whiteSpace: 'nowrap' }}>
                         <span className={isPos ? 'tv-pill-up' : 'tv-pill-down'}>
                           {formatPercent(changePercent)}
                         </span>
                       </td>
 
-                      <td className="is-right">
+                      <td className="is-right tv-col-hide-sm">
                         <div style={{ display: 'inline-flex', justifyContent: 'flex-end' }}>
                           <SparklineSvg
                             values={meta?.spark ?? []}
@@ -243,11 +243,11 @@ export const AssetCategorySection: React.FC = () => {
                         </div>
                       </td>
 
-                      <td className="is-right tv-num" style={{ color: 'var(--tv-text-secondary)' }}>
+                      <td className="is-right tv-num tv-col-hide-md" style={{ color: 'var(--tv-text-secondary)' }}>
                         {formatVolume(volume)}
                       </td>
 
-                      <td className="is-right">
+                      <td className="is-right tv-col-hide-sm">
                         <span
                           className={`tv-rating-pill ${ratingBadgeClass(
                             meta?.rating ?? 'Neutrale',
@@ -403,9 +403,9 @@ export const UsStocksSection: React.FC = () => {
                   <th>Simbolo</th>
                   <th className="is-right">Prezzo</th>
                   <th className="is-right">Var %</th>
-                  <th className="is-right">Andamento</th>
-                  <th className="is-right">Cap. Mercato</th>
-                  <th className="is-right">Volume</th>
+                  <th className="is-right tv-col-hide-sm">Andamento</th>
+                  <th className="is-right tv-col-hide-sm">Cap. Mercato</th>
+                  <th className="is-right tv-col-hide-md">Volume</th>
                 </tr>
               </thead>
               <tbody>
@@ -418,21 +418,21 @@ export const UsStocksSection: React.FC = () => {
                       title={`Apri ${sym.name} su Supercharts`}
                     >
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                           <span
                             className="tv-symbol-avatar"
                             style={{ backgroundColor: sym.logoColor }}
                           >
                             {sym.logoText}
                           </span>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--tv-text-heading)' }}>
-                              <span>{sym.name}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--tv-text-heading)', minWidth: 0 }}>
+                              <span className="tv-stock-name">{sym.name}</span>
                               <SourcePill source={source} />
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                              <span className="tv-ticker-badge">{sym.ticker}</span>
-                              <span style={{ fontSize: 11, color: 'var(--tv-text-muted)' }}>
+                              <span className="tv-ticker-pill">{sym.ticker}</span>
+                              <span className="tv-stock-sector-meta" style={{ fontSize: 11, color: 'var(--tv-text-muted)' }}>
                                 {sym.exchange} · {sym.sector}
                               </span>
                             </div>
@@ -440,7 +440,7 @@ export const UsStocksSection: React.FC = () => {
                         </div>
                       </td>
 
-                      <td className="is-right tv-num">
+                      <td className="is-right tv-num" style={{ whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 700, color: 'var(--tv-text-heading)' }}>
                           {formatPrice(price, sym.precision)}
                         </span>{' '}
@@ -449,13 +449,13 @@ export const UsStocksSection: React.FC = () => {
                         </span>
                       </td>
 
-                      <td className="is-right">
+                      <td className="is-right" style={{ whiteSpace: 'nowrap' }}>
                         <span className={isPos ? 'tv-pill-up' : 'tv-pill-down'}>
                           {formatPercent(changePercent)}
                         </span>
                       </td>
 
-                      <td className="is-right">
+                      <td className="is-right tv-col-hide-sm">
                         <div style={{ display: 'inline-flex', justifyContent: 'flex-end' }}>
                           <SparklineSvg
                             values={sparks.get(sym.ticker) ?? []}
@@ -466,11 +466,11 @@ export const UsStocksSection: React.FC = () => {
                         </div>
                       </td>
 
-                      <td className="is-right tv-num" style={{ color: 'var(--tv-text-primary)', fontWeight: 600 }}>
+                      <td className="is-right tv-num tv-col-hide-sm" style={{ color: 'var(--tv-text-primary)', fontWeight: 600 }}>
                         {formatMarketCap(sym.marketCap)}
                       </td>
 
-                      <td className="is-right tv-num" style={{ color: 'var(--tv-text-secondary)' }}>
+                      <td className="is-right tv-num tv-col-hide-md" style={{ color: 'var(--tv-text-secondary)' }}>
                         {formatVolume(volume)}
                       </td>
                     </tr>

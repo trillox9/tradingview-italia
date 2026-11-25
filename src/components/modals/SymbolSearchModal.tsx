@@ -588,12 +588,15 @@ export function SymbolSearchModal({
                             <div className="tvm-symbol-meta">
                               <div className="tvm-symbol-ticker-line">
                                 <span className="tvm-symbol-ticker">{sym.ticker}</span>
-                                <span className="tvm-asset-tag">
+                                <span className="tvm-asset-tag tvm-symbol-asset-tag">
                                   {ASSET_CLASS_BADGE_IT[sym.assetClass]}
                                 </span>
                                 {renderSourceBadge(live?.source)}
                               </div>
                               <div className="tvm-symbol-desc-line">
+                                <span className="tvm-symbol-exch-inline">
+                                  {flag} {sym.exchange} ·
+                                </span>
                                 <span className="tvm-symbol-name">{sym.name}</span>
                               </div>
                             </div>
@@ -617,13 +620,13 @@ export function SymbolSearchModal({
                               </span>
                             </div>
 
-                            <span className="tvm-exchange-pill">
+                            <span className="tvm-exchange-pill tvm-symbol-exch-desktop">
                               <span>{flag}</span>
                               <span>{sym.exchange}</span>
                             </span>
 
                             <div
-                              className="tvm-row-actions"
+                              className="tvm-row-actions tvm-symbol-actions-desktop"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <button

@@ -430,7 +430,7 @@ export const HomePage: React.FC = () => {
                       <button
                         key={ticker}
                         type="button"
-                        className="tv-ticker-badge"
+                        className="tv-ticker-pill"
                         onClick={() => openSymbolInChart(ticker)}
                       >
                         {ticker}

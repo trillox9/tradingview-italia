@@ -445,7 +445,10 @@ export function ScreenerPage() {
         )}
 
         {/* Presets Strip */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <div
+          className="tvp-presets-strip"
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}
+        >
           <span
             style={{
               fontSize: '0.75rem',
@@ -642,7 +645,6 @@ export function ScreenerPage() {
                       Simbolo {renderSortIcon('ticker')}
                     </span>
                   </th>
-                  <th style={{ textAlign: 'center' }}>Andamento</th>
                   <th className="is-sortable" onClick={() => handleSort('price')}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       Ultimo {renderSortIcon('price')}
@@ -653,37 +655,42 @@ export function ScreenerPage() {
                       Var % {renderSortIcon('changePercent')}
                     </span>
                   </th>
-                  <th className="is-sortable" onClick={() => handleSort('volume')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      Volume {renderSortIcon('volume')}
-                    </span>
+                  <th className="tvp-col-hide-md" style={{ textAlign: 'center' }}>
+                    Andamento
                   </th>
-                  <th className="is-sortable" onClick={() => handleSort('relativeVolume')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      Vol. Rel {renderSortIcon('relativeVolume')}
-                    </span>
-                  </th>
-                  <th className="is-sortable" onClick={() => handleSort('marketCap')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      Cap. {renderSortIcon('marketCap')}
-                    </span>
-                  </th>
-                  <th className="is-sortable" onClick={() => handleSort('peRatio')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      P/E {renderSortIcon('peRatio')}
-                    </span>
-                  </th>
-                  <th className="is-sortable" onClick={() => handleSort('rsi14')}>
+                  <th className="is-sortable tvp-col-hide-sm" onClick={() => handleSort('rsi14')}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       RSI (14) {renderSortIcon('rsi14')}
                     </span>
                   </th>
-                  <th className="is-sortable" onClick={() => handleSort('technicalScore')}>
+                  <th className="is-sortable tvp-col-hide-sm" onClick={() => handleSort('technicalScore')}>
                     <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                       Rating tecnico {renderSortIcon('technicalScore')}
                     </span>
                   </th>
-                  <th style={{ textAlign: 'center' }}>Lista</th>
+                  <th className="is-sortable tvp-col-hide-sm" onClick={() => handleSort('volume')}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      Volume {renderSortIcon('volume')}
+                    </span>
+                  </th>
+                  <th className="is-sortable tvp-col-hide-md" onClick={() => handleSort('relativeVolume')}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      Vol. Rel {renderSortIcon('relativeVolume')}
+                    </span>
+                  </th>
+                  <th className="is-sortable tvp-col-hide-sm" onClick={() => handleSort('marketCap')}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      Cap. {renderSortIcon('marketCap')}
+                    </span>
+                  </th>
+                  <th className="is-sortable tvp-col-hide-md" onClick={() => handleSort('peRatio')}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      P/E {renderSortIcon('peRatio')}
+                    </span>
+                  </th>
+                  <th className="tvp-col-hide-md" style={{ textAlign: 'center' }}>
+                    Lista
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -729,7 +736,7 @@ export function ScreenerPage() {
                         onClick={() => openSymbolInChart(row.ticker)}
                       >
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div className="tvp-scr-sym-cell">
                             <span
                               className="tvm-avatar tvm-avatar--sm"
                               style={{ backgroundColor: row.symbol.logoColor }}
@@ -737,32 +744,22 @@ export function ScreenerPage() {
                               {row.symbol.logoText}
                             </span>
                             <div style={{ minWidth: 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                                 <span style={{ fontWeight: 700, color: 'var(--tv-text-heading, #ffffff)' }}>
                                   {row.ticker}
                                 </span>
-                                <span className="tvm-asset-tag">{row.exchange}</span>
+                                <span className="tvm-asset-tag tvp-col-hide-sm">{row.exchange}</span>
                                 {renderSourceTag(source)}
                               </div>
-                              <div
-                                className="tvm-subtitle tv-truncate"
-                                style={{ maxWidth: 210 }}
-                              >
+                              <div className="tvm-subtitle tv-truncate tvp-scr-name">
                                 {row.name}
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <MiniSparkline
-                            id={row.symbol.id}
-                            points={getCachedSparkline(row.ticker)}
-                            isUp={isUp}
-                          />
-                        </td>
                         <td style={{ fontWeight: 700, color: 'var(--tv-text-heading, #ffffff)' }}>
                           {formatPrice(row.price, row.symbol.precision)}{' '}
-                          <span style={{ fontSize: '0.7rem', color: 'var(--tv-text-muted, #8c8c8c)', fontWeight: 500 }}>
+                          <span className="tvp-scr-currency">
                             {row.currency}
                           </span>
                         </td>
@@ -771,21 +768,14 @@ export function ScreenerPage() {
                             {formatPercent(row.changePercent)}
                           </span>
                         </td>
-                        <td>{formatVolume(row.volume)}</td>
-                        <td
-                          style={{
-                            color:
-                              row.relativeVolume >= 1.3
-                                ? 'var(--tv-up, #22ab94)'
-                                : 'var(--tv-text-secondary, #8c8c8c)',
-                            fontWeight: row.relativeVolume >= 1.3 ? 700 : 500,
-                          }}
-                        >
-                          {row.relativeVolume.toFixed(2)}×
+                        <td className="tvp-col-hide-md" style={{ textAlign: 'center' }}>
+                          <MiniSparkline
+                            id={row.symbol.id}
+                            points={getCachedSparkline(row.ticker)}
+                            isUp={isUp}
+                          />
                         </td>
-                        <td>{formatMarketCap(row.marketCap)}</td>
-                        <td>{row.peRatio !== null ? row.peRatio.toFixed(1) : '—'}</td>
-                        <td>
+                        <td className="tvp-col-hide-sm">
                           <span
                             className="tvp-rsi-pill"
                             style={{ backgroundColor: rsiBg, color: rsiColor }}
@@ -793,7 +783,7 @@ export function ScreenerPage() {
                             {rsi !== null ? rsi.toFixed(1) : '—'}
                           </span>
                         </td>
-                        <td>
+                        <td className="tvp-col-hide-sm">
                           <span className={ratingClassName(row.technicalRating)}>
                             {row.technicalRating.includes('acquisto') ||
                             row.technicalRating === 'Acquisto' ? (
@@ -805,7 +795,25 @@ export function ScreenerPage() {
                             {row.technicalRating}
                           </span>
                         </td>
+                        <td className="tvp-col-hide-sm">{formatVolume(row.volume)}</td>
                         <td
+                          className="tvp-col-hide-md"
+                          style={{
+                            color:
+                              row.relativeVolume >= 1.3
+                                ? 'var(--tv-up, #22ab94)'
+                                : 'var(--tv-text-secondary, #8c8c8c)',
+                            fontWeight: row.relativeVolume >= 1.3 ? 700 : 500,
+                          }}
+                        >
+                          {row.relativeVolume.toFixed(2)}×
+                        </td>
+                        <td className="tvp-col-hide-sm">{formatMarketCap(row.marketCap)}</td>
+                        <td className="tvp-col-hide-md">
+                          {row.peRatio !== null ? row.peRatio.toFixed(1) : '—'}
+                        </td>
+                        <td
+                          className="tvp-col-hide-md"
                           style={{ textAlign: 'center' }}
                           onClick={(e) => e.stopPropagation()}
                         >

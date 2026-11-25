@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { Candle } from '../../types';
 import { formatPercent, formatPrice } from '../../data';
 
@@ -66,6 +66,26 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
   const gradId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(760);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const updateWidth = () => {
+      const next = Math.round(el.getBoundingClientRect().width);
+      if (next >= 220) {
+        setContainerWidth(next);
+      }
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => updateWidth());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const series = useMemo(() => {
     if (!candles.length) return [];
@@ -79,13 +99,25 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
     return copy;
   }, [candles, livePrice]);
 
-  const width = 760;
-  const padLeft = 8;
-  const padRight = precision >= 6 ? 104 : precision >= 4 ? 86 : 74;
+  const isCompact = containerWidth < 500;
+  const width = Math.max(280, Math.min(1200, containerWidth));
+  const effectiveHeight = isCompact ? Math.min(height, 224) : height;
+  const padLeft = isCompact ? 6 : 8;
+  const padRight = isCompact
+    ? precision >= 6
+      ? 92
+      : precision >= 4
+        ? 80
+        : 72
+    : precision >= 6
+      ? 108
+      : precision >= 4
+        ? 92
+        : 82;
   const padTop = 14;
   const padBottom = 26;
-  const plotW = width - padLeft - padRight;
-  const plotH = height - padTop - padBottom;
+  const plotW = Math.max(120, width - padLeft - padRight);
+  const plotH = Math.max(80, effectiveHeight - padTop - padBottom);
 
   const computed = useMemo(() => {
     if (series.length < 2) return null;
@@ -127,7 +159,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
       return { y: padTop + ratio * plotH, value: val };
     });
 
-    const xTickCount = 6;
+    const xTickCount = isCompact ? 4 : 6;
     const xTicks = Array.from({ length: xTickCount }, (_, k) => {
       const idx = Math.round((k / (xTickCount - 1)) * (series.length - 1));
       return {
@@ -137,6 +169,8 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
     });
 
     const lastPt = points[points.length - 1];
+    const pillY = Math.max(padTop + 10, Math.min(padTop + plotH - 10, lastPt.y));
+
     return {
       positive,
       firstClose,
@@ -147,8 +181,9 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
       yTicks,
       xTicks,
       lastPt,
+      pillY,
     };
-  }, [series, chartStyle, isPositive, plotW, plotH, rangeKey]);
+  }, [series, chartStyle, isPositive, plotW, plotH, padLeft, rangeKey, isCompact]);
 
   const handleMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
     if (!computed || !containerRef.current) return;
@@ -161,7 +196,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
   };
 
   if (!computed) {
-    return <div className="tv-skeleton" style={{ width: '100%', height }} />;
+    return <div className="tv-skeleton" style={{ width: '100%', height: effectiveHeight }} />;
   }
 
   const strokeColor = computed.positive ? 'var(--tv-up-solid)' : 'var(--tv-down-solid)';
@@ -170,6 +205,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
     ? ((hovered.candle.close - computed.firstClose) / (computed.firstClose || 1)) * 100
     : 0;
   const candleWidth = Math.max(2, Math.min(9, (plotW / computed.points.length) * 0.65));
+  const axisFontSize = isCompact ? 10 : 11;
 
   return (
     <div ref={containerRef} className="tv-mini-chart-wrap">
@@ -177,7 +213,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
         <div
           className="tv-mini-chart-tooltip tv-num"
           style={{
-            left: `${Math.min(72, Math.max(2, (hovered.x / width) * 100))}%`,
+            left: `${Math.min(isCompact ? 50 : 72, Math.max(2, (hovered.x / width) * 100))}%`,
           }}
         >
           <span style={{ fontWeight: 700, marginRight: 8 }}>
@@ -199,9 +235,9 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
       )}
 
       <svg
-        viewBox={`0 0 ${width} ${height}`}
+        viewBox={`0 0 ${width} ${effectiveHeight}`}
         className="tv-mini-chart-svg"
-        style={{ height }}
+        style={{ height: effectiveHeight }}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setHoverIdx(null)}
         role="img"
@@ -214,9 +250,9 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
           </linearGradient>
         </defs>
 
-        {/* Horizontal gridlines + right price labels (suppress label if colliding with last-price pill) */}
+        {/* Horizontal gridlines + right price labels (suppress label if within 24px of last-price pill) */}
         {computed.yTicks.map((tick, i) => {
-          const collidesWithLastPill = Math.abs(tick.y - computed.lastPt.y) < 16;
+          const collidesWithLastPill = Math.abs(tick.y - computed.pillY) < 24;
           return (
             <g key={i}>
               <line
@@ -232,7 +268,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
                   x={padLeft + plotW + 8}
                   y={tick.y + 4}
                   fill="var(--tv-text-muted)"
-                  fontSize="11"
+                  fontSize={axisFontSize}
                   className="tv-num"
                 >
                   {formatPrice(tick.value, precision)}
@@ -247,10 +283,10 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
           <text
             key={i}
             x={tick.x}
-            y={height - 6}
+            y={effectiveHeight - 6}
             textAnchor={i === 0 ? 'start' : i === computed.xTicks.length - 1 ? 'end' : 'middle'}
             fill="var(--tv-text-muted)"
-            fontSize="11"
+            fontSize={axisFontSize}
             className="tv-num"
           >
             {tick.label}
@@ -292,7 +328,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
           })
         )}
 
-        {/* Current price dashed line & right price pill */}
+        {/* Current price dashed line & clamped right price pill */}
         <line
           x1={padLeft}
           x2={padLeft + plotW}
@@ -305,7 +341,7 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
         />
         <rect
           x={padLeft + plotW + 4}
-          y={computed.lastPt.y - 10}
+          y={computed.pillY - 10}
           width={padRight - 6}
           height={20}
           rx="4"
@@ -313,9 +349,9 @@ export const MiniAreaChart: React.FC<MiniAreaChartProps> = ({
         />
         <text
           x={padLeft + plotW + 9}
-          y={computed.lastPt.y + 4}
+          y={computed.pillY + 4}
           fill="#ffffff"
-          fontSize="10.5"
+          fontSize={isCompact ? 9.5 : 10.5}
           fontWeight="600"
           className="tv-num"
         >

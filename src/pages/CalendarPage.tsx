@@ -404,7 +404,7 @@ export function CalendarPage() {
                           }
                         }}
                       >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div className="tvp-cal-cell-time">
                           <span className="tv-mono" style={{ fontWeight: 700, color: 'var(--tv-text-heading, #fff)' }}>
                             {evt.time}
                           </span>
@@ -419,7 +419,7 @@ export function CalendarPage() {
                           </span>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <div className="tvp-cal-cell-country">
                           <span style={{ fontSize: '1.1rem' }}>
                             {COUNTRY_FLAGS[evt.country] ?? '🌐'}
                           </span>
@@ -427,14 +427,14 @@ export function CalendarPage() {
                             <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--tv-text-heading, #fff)' }}>
                               {evt.currency}
                             </div>
-                            <div className="tvm-subtitle" style={{ fontSize: '0.7rem' }}>
+                            <div className="tvm-subtitle tvp-cal-country-name" style={{ fontSize: '0.7rem' }}>
                               {evt.countryName}
                             </div>
                           </div>
                         </div>
 
                         <div
-                          className="tvp-impact-stars tvp-cal-hide-sm"
+                          className="tvp-impact-stars tvp-cal-cell-impact"
                           title={`Importanza ${evt.impact}/3`}
                           aria-label={`Importanza ${evt.impact} su 3`}
                         >
@@ -457,11 +457,11 @@ export function CalendarPage() {
                           })}
                         </div>
 
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, color: 'var(--tv-text-heading, #fff)', lineHeight: 1.3 }}>
+                        <div className="tvp-cal-cell-event">
+                          <div style={{ fontWeight: 600, color: 'var(--tv-text-heading, #fff)', lineHeight: 1.35 }}>
                             {evt.title}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 3 }}>
                             <span className="tvm-asset-tag">{evt.institution}</span>
                             <span className="tvm-subtitle" style={{ fontSize: '0.72rem' }}>
                               {CATEGORY_LABELS_IT[evt.category]}
@@ -470,7 +470,7 @@ export function CalendarPage() {
                         </div>
 
                         <div
-                          className={`tv-num ${
+                          className={`tv-num tvp-cal-cell-actual ${
                             tone === 'up'
                               ? 'tvm-delta-up'
                               : tone === 'down'
@@ -478,7 +478,6 @@ export function CalendarPage() {
                                 : ''
                           }`}
                           style={{
-                            textAlign: 'right',
                             fontWeight: 700,
                             color:
                               tone === 'neutral'
@@ -488,24 +487,27 @@ export function CalendarPage() {
                                 : undefined,
                           }}
                         >
-                          {evt.actual ?? '—'}
+                          <span className="tvp-cal-mobile-lbl">Attuale</span>
+                          <span>{evt.actual ?? '—'}</span>
                         </div>
 
                         <div
-                          className="tv-num tvp-cal-hide-sm"
-                          style={{ textAlign: 'right', color: 'var(--tv-text-primary, #dbdbdb)' }}
+                          className="tv-num tvp-cal-cell-forecast"
+                          style={{ color: 'var(--tv-text-primary, #dbdbdb)' }}
                         >
-                          {evt.forecast ?? '—'}
+                          <span className="tvp-cal-mobile-lbl">Previsto</span>
+                          <span>{evt.forecast ?? '—'}</span>
                         </div>
 
                         <div
-                          className="tv-num tvp-cal-hide-sm"
-                          style={{ textAlign: 'right', color: 'var(--tv-text-secondary, #8c8c8c)' }}
+                          className="tv-num tvp-cal-cell-prev"
+                          style={{ color: 'var(--tv-text-secondary, #8c8c8c)' }}
                         >
-                          {evt.previous ?? '—'}
+                          <span className="tvp-cal-mobile-lbl">Precedente</span>
+                          <span>{evt.previous ?? '—'}</span>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', color: 'var(--tv-text-secondary, #8c8c8c)' }}>
+                        <div className="tvp-cal-cell-chevron">
                           {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                         </div>
                       </div>

@@ -246,22 +246,37 @@ export function HeatmapPage() {
   } | null>(null);
   const canvasRef = useRef<HTMLElement | null>(null);
   const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({
-    w: 1332,
+    w: typeof window !== 'undefined' ? Math.min(1332, Math.max(320, window.innerWidth - 24)) : 1332,
     h: 620,
   });
+  const [isMobileLayout, setIsMobileLayout] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 640 : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 640px)');
+    const sync = () => setIsMobileLayout(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
 
   useEffect(() => {
     const el = canvasRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
-      if (rect && rect.width > 0 && rect.height > 0) {
-        setCanvasSize({ w: Math.round(rect.width), h: Math.round(rect.height) });
+      if (rect && rect.width > 0) {
+        setCanvasSize({
+          w: Math.round(rect.width),
+          h: Math.round(rect.height > 0 ? rect.height : 620),
+        });
       }
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [isMobileLayout]);
 
   const allMarketTiles = useMemo<HeatmapTileItem[]>(() => {
     const toTile = (sym: SymbolInfo, exponent: number): HeatmapTileItem => {
@@ -567,37 +582,30 @@ export function HeatmapPage() {
           </div>
         </section>
 
-        {/* Interactive Squarified Treemap */}
-        <section
-          ref={canvasRef}
-          className="tvp-heatmap-canvas"
-          aria-label="Mappa di calore interattiva"
-          onMouseLeave={() => setHovered(null)}
-        >
-          {sectorRects.map((sRect) => {
-            const group = sRect.item;
-            const innerW = Math.max(40, (sRect.w / 100) * canvasSize.w - 6);
-            const innerH = Math.max(40, (sRect.h / 100) * canvasSize.h - 30);
-            const tileRects = computeSquarifiedLayout(
-              group.tiles.map((t) => ({ item: t, value: t.weight })),
-              innerW,
-              innerH,
-            );
+        {/* Interactive Squarified Treemap (Desktop/Tablet) or Full-Width Sector Cards (Mobile <= 640px) */}
+        {isMobileLayout ? (
+          <section
+            ref={canvasRef}
+            className="tvp-heatmap-mobile-stack"
+            aria-label="Mappa di calore interattiva per settore"
+            onMouseLeave={() => setHovered(null)}
+          >
+            {sectorGroups.map((group) => {
+              const cardW = Math.max(300, canvasSize.w - 4);
+              const rowsNeeded = Math.max(1, Math.ceil(group.tiles.length / 3));
+              const cardH = Math.max(116, Math.min(280, rowsNeeded * 74));
+              const tileRects = computeSquarifiedLayout(
+                group.tiles.map((t) => ({ item: t, value: t.weight })),
+                cardW,
+                cardH,
+              );
 
-            return (
-              <div
-                key={group.name}
-                className="tvp-hm-sector"
-                style={{
-                  left: `${sRect.x}%`,
-                  top: `${sRect.y}%`,
-                  width: `${sRect.w}%`,
-                  height: `${sRect.h}%`,
-                }}
-              >
-                <div className="tvp-hm-sector-inner">
-                  <div className="tvp-hm-sector-head">
-                    <span className="tv-truncate">{group.name}</span>
+              return (
+                <div key={group.name} className="tvp-hm-mobile-card">
+                  <div className="tvp-hm-sector-head" style={{ height: 32, padding: '0 12px', fontSize: '0.75rem' }}>
+                    <span className="tv-truncate">
+                      {group.name} ({group.tiles.length})
+                    </span>
                     <span
                       className={
                         group.avgChangePercent >= 0 ? 'tvm-delta-up' : 'tvm-delta-down'
@@ -606,36 +614,35 @@ export function HeatmapPage() {
                       {formatPercent(group.avgChangePercent)}
                     </span>
                   </div>
-
-                  <div className="tvp-hm-sector-tiles">
+                  <div
+                    className="tvp-hm-sector-tiles"
+                    style={{ height: `${cardH}px` }}
+                  >
                     {tileRects.map((tRect) => {
                       const tile = tRect.item;
                       const bg = getHeatmapTileColor(tile.changePercent);
-                      const approxPxW = (tRect.w / 100) * innerW;
-                      const approxPxH = (tRect.h / 100) * innerH;
-                      const area = approxPxW * approxPxH;
+                      const approxPxW = (tRect.w / 100) * cardW;
+                      const approxPxH = (tRect.h / 100) * cardH;
                       const displayLabel =
                         tile.symbol.assetClass === 'crypto'
                           ? tile.ticker.replace(/USDT$/, '')
                           : tile.ticker;
-                      const showTicker = approxPxW >= 34 && approxPxH >= 20;
-                      const showPct = approxPxW >= 54 && approxPxH >= 38;
-                      const showSub =
-                        area > 20000 && approxPxW >= 145 && approxPxH >= 104;
+                      const showTicker = approxPxW >= 36 && approxPxH >= 24;
+                      const showPct = approxPxW >= 54 && approxPxH >= 42;
                       const charFitPx = Math.floor(
                         (approxPxW - 10) / Math.max(2.6, displayLabel.length * 0.72),
                       );
                       const heightFitPx = Math.floor(approxPxH * (showPct ? 0.28 : 0.42));
                       const tickerPx = Math.max(
-                        10,
-                        Math.min(20, charFitPx, heightFitPx),
+                        11,
+                        Math.min(18, charFitPx, heightFitPx),
                       );
                       const pctPx = Math.max(
                         10,
                         Math.min(
-                          14,
+                          13,
                           Math.floor((approxPxW - 10) / 5.4),
-                          Math.floor(approxPxH * 0.2),
+                          Math.floor(approxPxH * 0.22),
                         ),
                       );
 
@@ -652,8 +659,6 @@ export function HeatmapPage() {
                             backgroundColor: bg,
                           }}
                           onClick={() => openSymbolInChart(tile.ticker)}
-                          onMouseEnter={(e) => handleTileMove(tile, e)}
-                          onMouseMove={(e) => handleTileMove(tile, e)}
                           aria-label={`${tile.ticker} ${tile.name} ${formatPercent(tile.changePercent)}`}
                         >
                           {showTicker && (
@@ -672,21 +677,135 @@ export function HeatmapPage() {
                               {formatPercent(tile.changePercent)}
                             </span>
                           )}
-                          {showSub && (
-                            <span className="tvp-hm-tile-sub">
-                              {formatPrice(tile.price, tile.symbol.precision)}{' '}
-                              {tile.symbol.currency} · {tile.symbol.shortName}
-                            </span>
-                          )}
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </section>
+              );
+            })}
+          </section>
+        ) : (
+          <section
+            ref={canvasRef}
+            className="tvp-heatmap-canvas"
+            aria-label="Mappa di calore interattiva"
+            onMouseLeave={() => setHovered(null)}
+          >
+            {sectorRects.map((sRect) => {
+              const group = sRect.item;
+              const innerW = Math.max(40, (sRect.w / 100) * canvasSize.w - 6);
+              const innerH = Math.max(40, (sRect.h / 100) * canvasSize.h - 30);
+              const tileRects = computeSquarifiedLayout(
+                group.tiles.map((t) => ({ item: t, value: t.weight })),
+                innerW,
+                innerH,
+              );
+
+              return (
+                <div
+                  key={group.name}
+                  className="tvp-hm-sector"
+                  style={{
+                    left: `${sRect.x}%`,
+                    top: `${sRect.y}%`,
+                    width: `${sRect.w}%`,
+                    height: `${sRect.h}%`,
+                  }}
+                >
+                  <div className="tvp-hm-sector-inner">
+                    <div className="tvp-hm-sector-head">
+                      <span className="tv-truncate">{group.name}</span>
+                      <span
+                        className={
+                          group.avgChangePercent >= 0 ? 'tvm-delta-up' : 'tvm-delta-down'
+                        }
+                      >
+                        {formatPercent(group.avgChangePercent)}
+                      </span>
+                    </div>
+
+                    <div className="tvp-hm-sector-tiles">
+                      {tileRects.map((tRect) => {
+                        const tile = tRect.item;
+                        const bg = getHeatmapTileColor(tile.changePercent);
+                        const approxPxW = (tRect.w / 100) * innerW;
+                        const approxPxH = (tRect.h / 100) * innerH;
+                        const area = approxPxW * approxPxH;
+                        const displayLabel =
+                          tile.symbol.assetClass === 'crypto'
+                            ? tile.ticker.replace(/USDT$/, '')
+                            : tile.ticker;
+                        const showTicker = approxPxW >= 34 && approxPxH >= 20;
+                        const showPct = approxPxW >= 54 && approxPxH >= 38;
+                        const showSub =
+                          area > 20000 && approxPxW >= 145 && approxPxH >= 104;
+                        const charFitPx = Math.floor(
+                          (approxPxW - 10) / Math.max(2.6, displayLabel.length * 0.72),
+                        );
+                        const heightFitPx = Math.floor(approxPxH * (showPct ? 0.28 : 0.42));
+                        const tickerPx = Math.max(
+                          10,
+                          Math.min(20, charFitPx, heightFitPx),
+                        );
+                        const pctPx = Math.max(
+                          10,
+                          Math.min(
+                            14,
+                            Math.floor((approxPxW - 10) / 5.4),
+                            Math.floor(approxPxH * 0.2),
+                          ),
+                        );
+
+                        return (
+                          <button
+                            key={tile.symbol.id}
+                            type="button"
+                            className="tvp-hm-tile"
+                            style={{
+                              left: `${tRect.x}%`,
+                              top: `${tRect.y}%`,
+                              width: `${tRect.w}%`,
+                              height: `${tRect.h}%`,
+                              backgroundColor: bg,
+                            }}
+                            onClick={() => openSymbolInChart(tile.ticker)}
+                            onMouseEnter={(e) => handleTileMove(tile, e)}
+                            onMouseMove={(e) => handleTileMove(tile, e)}
+                            aria-label={`${tile.ticker} ${tile.name} ${formatPercent(tile.changePercent)}`}
+                          >
+                            {showTicker && (
+                              <span
+                                className="tvp-hm-tile-ticker"
+                                style={{ fontSize: `${tickerPx}px` }}
+                              >
+                                {displayLabel}
+                              </span>
+                            )}
+                            {showPct && (
+                              <span
+                                className="tvp-hm-tile-pct"
+                                style={{ fontSize: `${pctPx}px` }}
+                              >
+                                {formatPercent(tile.changePercent)}
+                              </span>
+                            )}
+                            {showSub && (
+                              <span className="tvp-hm-tile-sub">
+                                {formatPrice(tile.price, tile.symbol.precision)}{' '}
+                                {tile.symbol.currency} · {tile.symbol.shortName}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        )}
 
         {/* Legend Footer */}
         <footer className="tvp-hm-legend">

@@ -1165,7 +1165,11 @@ export function TradingViewProvider({
   );
 
   // ---- Workspace UI Panels & Modals ----
-  const [rightPanel, setRightPanel] = useState<RightPanelTab>('watchlist');
+  const [rightPanel, setRightPanel] = useState<RightPanelTab>(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 900
+      ? null
+      : 'watchlist',
+  );
   const [bottomPanel, setBottomPanel] = useState<BottomPanelTab>(null);
   const [bottomPanelExpanded, setBottomPanelExpanded] = useState<boolean>(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(280);

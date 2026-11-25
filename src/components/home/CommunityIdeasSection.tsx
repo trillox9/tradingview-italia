@@ -125,7 +125,7 @@ export const CommunityIdeasSection: React.FC = () => {
                       </span>
                     )}
                     <span
-                      className="tv-ticker-badge"
+                      className="tv-ticker-pill"
                       style={{
                         backgroundColor: 'rgba(19, 23, 34, 0.92)',
                         color: '#ffffff',

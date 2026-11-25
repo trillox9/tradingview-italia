@@ -105,7 +105,7 @@ export function ChartBottomBar({
           {clock}
         </span>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-clock-sep" />
 
         <button
           type="button"

@@ -54,7 +54,16 @@ export const SparklineSvg: React.FC<SparklineSvgProps> = ({
   const strokeColor = isPositive ? 'var(--tv-up-solid)' : 'var(--tv-down-solid)';
 
   if (!linePath) {
-    return <svg width={width} height={height} className={className} aria-hidden="true" />;
+    return (
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className={className}
+        aria-hidden="true"
+        style={{ maxWidth: '100%', height: 'auto', flexShrink: 0 }}
+      />
+    );
   }
 
   return (
@@ -64,7 +73,7 @@ export const SparklineSvg: React.FC<SparklineSvgProps> = ({
       viewBox={`0 0 ${width} ${height}`}
       className={className}
       aria-hidden="true"
-      style={{ overflow: 'visible', flexShrink: 0 }}
+      style={{ maxWidth: '100%', height: 'auto', overflow: 'visible', flexShrink: 0 }}
     >
       {showArea && (
         <defs>

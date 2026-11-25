@@ -170,6 +170,7 @@ svg {
 .tv-section-heading {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   font-family: var(--tv-font-display);
   font-size: var(--tv-text-2xl);
@@ -177,6 +178,8 @@ svg {
   line-height: 1.2;
   letter-spacing: -0.015em;
   color: var(--tv-text-heading);
+  text-align: left;
+  max-width: 100%;
   transition: color var(--tv-transition-fast);
 }
 
@@ -286,11 +289,22 @@ svg {
   gap: 14px;
 }
 
+.tv-bento-asymmetric > *,
+.tv-bento-3 > *,
+.tv-bento-2 > *,
+.tv-grid-4 > *,
+.tv-grid-5 > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .tv-card {
   background-color: var(--tv-bg-primary);
   border: 1px solid var(--tv-border-card);
   border-radius: var(--tv-radius-xl);
   padding: var(--tv-card-pad);
+  min-width: 0;
+  max-width: 100%;
   transition: border-color var(--tv-transition-fast), background-color var(--tv-transition-fast);
 }
 
@@ -299,6 +313,8 @@ svg {
   border: 1px solid var(--tv-border-card);
   border-radius: var(--tv-radius-lg);
   padding: 14px 16px;
+  min-width: 0;
+  max-width: 100%;
   transition: border-color var(--tv-transition-fast), background-color var(--tv-transition-fast);
 }
 
@@ -505,11 +521,14 @@ svg {
 }
 
 /* Neutral ticker badge pill (e.g. FTMIB, STLAM, SPX) */
-.tv-ticker-badge {
+.tv-ticker-badge,
+.tv-ticker-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: auto;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: var(--tv-radius-xs);
   background-color: var(--tv-bg-chip);
   color: var(--tv-text-primary);
@@ -517,6 +536,8 @@ svg {
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Micro uppercase tag (STOCK, FOREX, SPOT CRYPTO, FUTURES) */
@@ -611,15 +632,27 @@ svg {
 }
 
 .tv-tabs {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+.tv-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tv-tab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  white-space: nowrap;
   height: 34px;
   padding: 0 14px;
   border-radius: var(--tv-radius-md);
@@ -910,6 +943,15 @@ svg {
 
   .tv-modal-backdrop {
     padding: 16px 8px;
+  }
+
+  .tv-pill-up,
+  .tv-pill-down,
+  .tv-pill-neutral {
+    min-width: 58px;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 11px;
   }
 }
 

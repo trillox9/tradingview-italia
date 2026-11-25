@@ -271,7 +271,7 @@ export const MarketSummarySection: React.FC = () => {
                     >
                       {activeSymbol.name}
                     </button>
-                    <span className="tv-ticker-badge" style={{ flexShrink: 0 }}>
+                    <span className="tv-ticker-pill" style={{ flexShrink: 0 }}>
                       {activeSymbol.ticker}
                     </span>
                     {isLiveSource(effectiveSource) ? (
@@ -426,7 +426,7 @@ export const MarketSummarySection: React.FC = () => {
                             <span className="tv-truncate">{sym.shortName}</span>
                             {live && <span className="tv-live-dot" title="Flusso live" />}
                           </div>
-                          <span className="tv-ticker-badge" style={{ marginTop: 3 }}>
+                          <span className="tv-ticker-pill" style={{ marginTop: 3 }}>
                             {sym.ticker}
                           </span>
                         </div>
@@ -506,7 +506,7 @@ export const MarketSummarySection: React.FC = () => {
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
                     {live && <span className="tv-live-dot" title="Live" />}
-                    <span className="tv-ticker-badge">{sym.ticker}</span>
+                    <span className="tv-ticker-pill">{sym.ticker}</span>
                   </div>
                 </div>
 
@@ -622,7 +622,7 @@ export const MarketSummarySection: React.FC = () => {
                           <span>{sym.shortName}</span>
                           {isLiveSource(q?.source) && <span className="tv-live-dot" />}
                         </div>
-                        <span className="tv-ticker-badge">{sym.ticker}</span>
+                        <span className="tv-ticker-pill">{sym.ticker}</span>
                       </div>
                     </div>
                     <div className="tv-num" style={{ textAlign: 'right' }}>
@@ -655,7 +655,7 @@ export const MarketSummarySection: React.FC = () => {
               <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--tv-text-heading)' }}>
                 Materie prime e Futures
               </span>
-              <span className="tv-ticker-badge">COMEX / NYMEX</span>
+              <span className="tv-ticker-pill">COMEX / NYMEX</span>
             </div>
 
             <SparklineSvg
@@ -691,7 +691,7 @@ export const MarketSummarySection: React.FC = () => {
                           <span>{sym.shortName}</span>
                           {isLiveSource(q?.source) && <span className="tv-live-dot" />}
                         </div>
-                        <span className="tv-ticker-badge">{sym.ticker}</span>
+                        <span className="tv-ticker-pill">{sym.ticker}</span>
                       </div>
                     </div>
                     <div className="tv-num" style={{ textAlign: 'right' }}>

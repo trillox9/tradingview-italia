@@ -24,7 +24,22 @@ export function ChartPage() {
   const { openModal } = useTradingView();
   const { setActiveTool, undo, redo } = useDrawings();
 
-  const [showDrawingBar, setShowDrawingBar] = useState<boolean>(true);
+  const [showDrawingBar, setShowDrawingBar] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth > 900 : true,
+  );
+
+  // Sync drawing toolbar visibility automatically when crossing the 900px responsive breakpoint
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const mq = window.matchMedia('(max-width: 900px)');
+    const onChange = (e: MediaQueryListEvent) => {
+      setShowDrawingBar(!e.matches);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
   const [hoveredCandle, setHoveredCandle] = useState<Candle | null>(null);
   const [hoveredCandleIndex, setHoveredCandleIndex] = useState<number | null>(null);
   const [rangeSignal, setRangeSignal] = useState<{

@@ -12,9 +12,11 @@ import {
   Flame,
   Globe,
   HelpCircle,
+  Home,
   Keyboard,
   LayoutGrid,
   LineChart,
+  Menu,
   Moon,
   Newspaper,
   Search,
@@ -23,6 +25,7 @@ import {
   TrendingUp,
   User,
   Wallet,
+  X,
 } from 'lucide-react';
 import { useTradingView } from '../../store';
 import type { AppView } from '../../store';
@@ -58,9 +61,24 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
   } = useTradingView();
 
   const [openMenu, setOpenMenu] = useState<NavMenuKey>(null);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [scrolledPastHero, setScrolledPastHero] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const closeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setMobileDrawerOpen(false);
+    setOpenMenu(null);
+  }, [route.view, route.symbolId]);
+
+  useEffect(() => {
+    if (!mobileDrawerOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileDrawerOpen]);
 
   useEffect(() => {
     if (!transparentOverHero) {
@@ -84,6 +102,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setOpenMenu(null);
+        setMobileDrawerOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -115,17 +134,20 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
 
   const go = (view: AppView, symbolId?: string) => {
     setOpenMenu(null);
+    setMobileDrawerOpen(false);
     navigate(view, symbolId);
   };
 
   const goChartWithBottomTab = (tab: 'pine' | 'trading' | 'screener') => {
     setOpenMenu(null);
+    setMobileDrawerOpen(false);
     setBottomPanel(tab);
     navigate('chart');
   };
 
   const goMarketsAnchor = (anchorId?: string) => {
     setOpenMenu(null);
+    setMobileDrawerOpen(false);
     if (route.view !== 'markets') {
       navigate('markets');
     }
@@ -139,6 +161,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
   const isOverHero = transparentOverHero && !scrolledPastHero;
 
   return (
+    <>
     <header
       ref={headerRef}
       className={`tv-site-header${isOverHero ? ' is-over-hero' : ''}`}
@@ -146,6 +169,21 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
     >
       <div className="tv-site-header__inner">
         <div className="tv-site-header__left">
+          {/* Mobile / Tablet Hamburger Button (<= 1120px) */}
+          <button
+            type="button"
+            className="tv-mobile-menu-btn"
+            aria-label={mobileDrawerOpen ? 'Chiudi navigazione' : 'Apri navigazione'}
+            aria-expanded={mobileDrawerOpen}
+            aria-controls="tv-mobile-nav-drawer"
+            onClick={() => {
+              setOpenMenu(null);
+              setMobileDrawerOpen((prev) => !prev);
+            }}
+          >
+            {mobileDrawerOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+
           {/* Brand Logo */}
           <button
             type="button"
@@ -615,7 +653,7 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
           </div>
 
           {/* User Menu Popover (Menù utente with working Tema scuro switch) */}
-          <div className="tv-header-nav__item">
+          <div className="tv-header-nav__item tv-header-user-wrap">
             <button
               type="button"
               className="tv-header-icon-btn"
@@ -692,5 +730,200 @@ export const SiteHeader: React.FC<SiteHeaderProps> = ({
         </div>
       </div>
     </header>
+
+    {/* Full-Height Mobile / Tablet Slide-Out Navigation Drawer */}
+    {mobileDrawerOpen && (
+      <div className="tv-mobile-drawer-layer" data-testid="mobile-nav-drawer">
+        <div
+          className="tv-mobile-drawer-backdrop"
+          aria-hidden="true"
+          onClick={() => setMobileDrawerOpen(false)}
+        />
+        <aside
+          id="tv-mobile-nav-drawer"
+          className="tv-mobile-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigazione mobile"
+        >
+          <div className="tv-mobile-drawer__head">
+            <button
+              type="button"
+              className="tv-brand-logo"
+              onClick={() => go('home')}
+            >
+              <svg
+                width="26"
+                height="20"
+                viewBox="0 0 36 28"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path d="M14 22H7V11H0V4h14v18z" fill="currentColor" />
+                <path d="M28 22h-8l7.5-18h8L28 22z" fill="currentColor" />
+                <circle cx="20" cy="8" r="4" fill="#2962FF" />
+              </svg>
+              <span>TradingView</span>
+            </button>
+
+            <button
+              type="button"
+              className="tv-header-icon-btn"
+              aria-label="Chiudi navigazione"
+              onClick={() => setMobileDrawerOpen(false)}
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="tv-mobile-drawer__search-wrap">
+            <button
+              type="button"
+              className="tv-mobile-drawer__search"
+              onClick={() => {
+                setMobileDrawerOpen(false);
+                openModal('symbolSearch');
+              }}
+            >
+              <Search size={16} />
+              <span>Cerca mercati, simboli, ticker...</span>
+              <span className="tv-mobile-drawer__kbd">Ctrl+K</span>
+            </button>
+          </div>
+
+          <nav className="tv-mobile-drawer__nav" aria-label="Menu sezioni">
+            <div className="tv-dropdown-group">Piattaforma</div>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'home' ? ' is-active' : ''}`}
+              onClick={() => go('home')}
+            >
+              <Home size={18} />
+              <span>Home</span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'chart' ? ' is-active' : ''}`}
+              onClick={() => go('chart')}
+            >
+              <LineChart size={18} color="#2962FF" />
+              <span>Supercharts</span>
+              <span className="tv-live-badge" style={{ marginLeft: 'auto' }}>
+                <span className="tv-live-dot" />
+                LIVE
+              </span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'markets' ? ' is-active' : ''}`}
+              onClick={() => go('markets')}
+            >
+              <Globe size={18} />
+              <span>Mercati</span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'heatmap' ? ' is-active' : ''}`}
+              onClick={() => go('heatmap')}
+            >
+              <LayoutGrid size={18} />
+              <span>Mappa di calore</span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'screener' ? ' is-active' : ''}`}
+              onClick={() => go('screener')}
+            >
+              <Filter size={18} />
+              <span>Screener</span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'calendar' ? ' is-active' : ''}`}
+              onClick={() => go('calendar')}
+            >
+              <Calendar size={18} />
+              <span>Calendario economico</span>
+            </button>
+            <button
+              type="button"
+              className={`tv-mobile-drawer__item${route.view === 'community' ? ' is-active' : ''}`}
+              onClick={() => go('community')}
+            >
+              <Flame size={18} />
+              <span>Community &amp; Idee</span>
+            </button>
+
+            <div className="tv-dropdown-sep" />
+            <div className="tv-dropdown-group">Strumenti rapidi</div>
+            <button
+              type="button"
+              className="tv-mobile-drawer__item"
+              onClick={() => goChartWithBottomTab('trading')}
+            >
+              <Wallet size={18} color="#089981" />
+              <span>Paper Trading (€100K)</span>
+            </button>
+            <button
+              type="button"
+              className="tv-mobile-drawer__item"
+              onClick={() => goChartWithBottomTab('pine')}
+            >
+              <Code2 size={18} />
+              <span>Editor Pine Script</span>
+            </button>
+            <button
+              type="button"
+              className="tv-mobile-drawer__item"
+              onClick={() => goMarketsAnchor('markets-news')}
+            >
+              <Newspaper size={18} />
+              <span>Notizie mercati</span>
+            </button>
+            <button
+              type="button"
+              className="tv-mobile-drawer__item"
+              onClick={() => {
+                setMobileDrawerOpen(false);
+                openModal('shortcuts');
+              }}
+            >
+              <Keyboard size={18} />
+              <span>Scorciatoie da tastiera</span>
+            </button>
+          </nav>
+
+          <div className="tv-mobile-drawer__footer">
+            <button
+              type="button"
+              className="tv-mobile-drawer__item"
+              role="switch"
+              aria-checked={theme === 'dark'}
+              onClick={toggleTheme}
+            >
+              {theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
+              <span>Tema scuro</span>
+              <span
+                className={`tv-theme-switch${theme === 'dark' ? ' is-on' : ''}`}
+                aria-hidden="true"
+              >
+                <span className="tv-theme-switch__thumb" />
+              </span>
+            </button>
+            <button
+              type="button"
+              className="tv-btn tv-btn-primary"
+              style={{ width: '100%', marginTop: 8 }}
+              onClick={() => go('chart')}
+            >
+              <LineChart size={16} />
+              <span>Apri Supercharts</span>
+            </button>
+          </div>
+        </aside>
+      </div>
+    )}
+    </>
   );
 };

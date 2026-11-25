@@ -34,7 +34,10 @@
   grid-template-columns: 52px 1fr auto;
   gap: 4px;
   width: 100vw;
+  max-width: 100vw;
   height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
   overflow: hidden;
   background: var(--sc-gutter);
   color: var(--sc-text);
@@ -75,11 +78,14 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  max-width: 100vw;
   height: 38px;
   background: var(--sc-pane-bg);
   padding: 0 6px 0 0;
   gap: 2px;
-  z-index: 40;
+  overflow: hidden;
+  z-index: 80;
 }
 
 .sc-top-left,
@@ -92,13 +98,30 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
 }
 
 .sc-top-left {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   overflow-x: auto;
-  overflow-y: visible;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 .sc-top-left::-webkit-scrollbar {
   display: none;
+}
+
+.sc-top-right {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+}
+
+.sc-mobile-only,
+.sc-mobile-menu-only,
+.sc-tf-compact-val,
+.sc-legend-name-short {
+  display: none;
+}
+
+.sc-tf-compact {
+  width: 28px;
+  padding: 0;
 }
 
 .sc-burger-slot {
@@ -1056,4 +1079,242 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
   font-size: 12.5px;
   font-weight: 500;
   box-shadow: var(--sc-shadow);
+}
+
+/* ======================== RESPONSIVE: TABLET & MOBILE (<= 900px) ======================== */
+@media (max-width: 900px) {
+  .tv-supercharts,
+  .tv-supercharts--no-drawing {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .sc-center-column {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Float drawing toolbar as an overlay strip when toggled ON instead of shrinking canvas */
+  .sc-left-bar {
+    position: fixed;
+    top: 44px;
+    left: 6px;
+    bottom: 84px;
+    width: 48px;
+    height: auto;
+    border-radius: 10px;
+    border: 1px solid var(--sc-border);
+    box-shadow: var(--sc-shadow);
+    z-index: 55;
+  }
+
+  /* Right sidebar & rail never steal horizontal grid width on <= 900px */
+  .sc-right-area {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 0;
+    height: 0;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 60;
+  }
+
+  .sc-right-area > * {
+    pointer-events: auto;
+  }
+
+  .sc-right-area .tv-right-rail {
+    display: none;
+  }
+
+  /* Compact top toolbar: zero overlap at 768px, 390px, 360px */
+  .sc-burger-slot {
+    width: 38px;
+    flex: 0 0 38px;
+  }
+
+  .sc-desktop-only,
+  .sc-desktop-label,
+  .sc-tf-inline {
+    display: none !important;
+  }
+
+  .sc-mobile-only {
+    display: inline-flex;
+  }
+
+  .sc-mobile-menu-only {
+    display: flex;
+  }
+
+  .sc-tf-compact {
+    width: auto;
+    padding: 0 7px;
+    gap: 3px;
+    font-weight: 600;
+    color: var(--sc-text-strong);
+  }
+
+  .sc-tf-compact-val {
+    display: inline;
+  }
+
+  .sc-menu {
+    max-width: calc(100vw - 12px);
+  }
+}
+
+@media (max-width: 640px) {
+  .sc-top-bar {
+    padding: 0 4px 0 0;
+    gap: 1px;
+  }
+
+  .sc-burger-slot {
+    width: 34px;
+    flex: 0 0 34px;
+  }
+
+  .sc-tablet-up,
+  .sc-tablet-up-label {
+    display: none !important;
+  }
+
+  .sc-tb-symbol {
+    padding: 0 6px;
+    gap: 5px;
+    font-size: 12.5px;
+    max-width: 112px;
+  }
+
+  .sc-tb-symbol > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sc-symbol-dot {
+    width: 16px;
+    height: 16px;
+    font-size: 8px;
+  }
+
+  .sc-ind-trigger {
+    padding: 0 6px;
+    gap: 3px;
+  }
+
+  .sc-trade-pill {
+    height: 26px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  /* Compact chart legend so candlesticks remain clearly visible */
+  .sc-legend-overlay {
+    top: 4px;
+    left: 6px;
+    gap: 2px;
+  }
+
+  .sc-legend-main-row {
+    gap: 4px;
+  }
+
+  .sc-legend-title-btn {
+    font-size: 12px;
+    padding: 1px 4px 1px 1px;
+    gap: 4px;
+  }
+
+  .sc-legend-name-full,
+  .sc-legend-exchange,
+  .sc-ohlc-verbose {
+    display: none;
+  }
+
+  .sc-legend-name-short {
+    display: inline;
+  }
+
+  .sc-legend-meta {
+    font-size: 11.5px;
+  }
+
+  .sc-source-pill {
+    padding: 1px 5px;
+    font-size: 9px;
+    gap: 4px;
+  }
+
+  .sc-ohlc-row {
+    font-size: 11.5px;
+    gap: 5px;
+  }
+
+  .sc-ind-row {
+    font-size: 10.5px;
+    padding: 1px 4px;
+    gap: 4px;
+  }
+
+  .sc-order-btn {
+    min-width: 56px;
+    padding: 2px 6px;
+  }
+
+  .sc-order-price {
+    font-size: 10.5px;
+  }
+
+  .sc-nav-controls {
+    display: none;
+  }
+
+  /* Bottom controls bar: hide clock so ranges + %, log, auto never clip */
+  .sc-bottom-bar {
+    height: 36px;
+    flex: 0 0 36px;
+    padding: 0 6px;
+    gap: 4px;
+  }
+
+  .sc-bottom-left {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sc-bottom-left::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sc-range-btn {
+    height: 24px;
+    padding: 0 5px;
+    font-size: 11.5px;
+    flex-shrink: 0;
+  }
+
+  .sc-clock,
+  .sc-clock-sep {
+    display: none;
+  }
+
+  .sc-replay-bar {
+    bottom: 36px;
+    max-width: calc(100% - 12px);
+    overflow-x: auto;
+    padding: 4px 7px;
+    gap: 4px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .sc-buysell-row {
+    display: none;
+  }
 }

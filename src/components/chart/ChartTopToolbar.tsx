@@ -8,10 +8,12 @@ import {
   Keyboard,
   LayoutGrid,
   LineChart,
+  List,
   Maximize2,
   Menu,
   Minimize2,
   Moon,
+  PenTool,
   Plus,
   Redo2,
   Rewind,
@@ -152,6 +154,8 @@ export function ChartTopToolbar({
     toggleTheme,
     navigate,
     openModal,
+    rightPanel,
+    setRightPanel,
     setBottomPanel,
     appendLog,
   } = useTradingView();
@@ -217,10 +221,10 @@ export function ChartTopToolbar({
       return;
     }
     const rect = el.getBoundingClientRect();
-    const maxLeft = Math.max(8, window.innerWidth - 260);
+    const maxLeft = Math.max(6, window.innerWidth - 236);
     setMenuPos({
       top: Math.round(rect.bottom + 4),
-      left: Math.min(Math.round(rect.left), maxLeft),
+      left: Math.max(6, Math.min(Math.round(rect.left), maxLeft)),
     });
     setOpenMenu(menu);
   };
@@ -292,10 +296,10 @@ export function ChartTopToolbar({
           <span>{activeSymbol.ticker}</span>
         </button>
 
-        {/* Compare Symbol (+) */}
+        {/* Compare Symbol (+) — desktop/tablet */}
         <button
           type="button"
-          className={`sc-tb-btn sc-tb-btn--icon ${activePane.compareSymbols.length > 0 ? 'sc-tb-btn--active' : ''}`}
+          className={`sc-tb-btn sc-tb-btn--icon sc-desktop-only ${activePane.compareSymbols.length > 0 ? 'sc-tb-btn--active' : ''}`}
           title="Confronta simboli"
           aria-label="Confronta simboli"
           onClick={() => openModal('compare')}
@@ -303,15 +307,15 @@ export function ChartTopToolbar({
           <Plus size={17} />
         </button>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-desktop-only" />
 
-        {/* Timeframe Quick Buttons + Dropdown */}
+        {/* Timeframe Quick Buttons (desktop > 900px) + Compact Dropdown Trigger (<= 900px) */}
         <div className="sc-tf-group" role="group" aria-label="Intervalli temporali">
           {TIMEFRAMES.map((tf) => (
             <button
               key={tf}
               type="button"
-              className={`sc-tb-btn sc-tf-btn ${activePane.timeframe === tf ? 'sc-tb-btn--active' : ''}`}
+              className={`sc-tb-btn sc-tf-btn sc-tf-inline ${activePane.timeframe === tf ? 'sc-tb-btn--active' : ''}`}
               title={TIMEFRAME_LABELS_IT[tf]}
               onClick={() => setTimeframe(tf)}
             >
@@ -320,23 +324,24 @@ export function ChartTopToolbar({
           ))}
           <button
             type="button"
-            className={`sc-tb-btn sc-tb-btn--icon ${openMenu === 'timeframe' ? 'sc-tb-btn--active' : ''}`}
-            title="Tutti i timeframe"
+            className={`sc-tb-btn sc-tf-compact ${openMenu === 'timeframe' ? 'sc-tb-btn--active' : ''}`}
+            title={`Intervallo: ${TIMEFRAME_LABELS_IT[activePane.timeframe]}`}
             aria-label="Seleziona intervallo temporale"
             aria-haspopup="menu"
             aria-expanded={openMenu === 'timeframe'}
             onClick={(e) => toggleMenuAt('timeframe', e.currentTarget)}
           >
-            <ChevronDown size={14} />
+            <span className="sc-tf-compact-val">{activePane.timeframe}</span>
+            <ChevronDown size={13} />
           </button>
         </div>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-tablet-up" />
 
         {/* Chart Style Selector */}
         <button
           type="button"
-          className={`sc-tb-btn ${openMenu === 'style' ? 'sc-tb-btn--active' : ''}`}
+          className={`sc-tb-btn sc-tablet-up ${openMenu === 'style' ? 'sc-tb-btn--active' : ''}`}
           title={`Stile grafico: ${currentStyleLabel}`}
           aria-label={`Stile grafico ${currentStyleLabel}`}
           aria-haspopup="menu"
@@ -347,41 +352,41 @@ export function ChartTopToolbar({
           <ChevronDown size={13} />
         </button>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-tablet-up" />
 
         {/* Indicators Button */}
         <button
           type="button"
-          className="sc-tb-btn"
+          className="sc-tb-btn sc-ind-trigger"
           title="Indicatori, metriche e strategie"
           aria-label="Indicatori, metriche e strategie"
           onClick={() => openModal('indicators')}
         >
           <LineChart size={16} />
-          <span>Indicatori</span>
+          <span className="sc-tablet-up-label">Indicatori</span>
           {visibleIndicatorCount > 0 && (
             <span className="sc-badge-count">{visibleIndicatorCount}</span>
           )}
         </button>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-desktop-only" />
 
         {/* Alert */}
         <button
           type="button"
-          className="sc-tb-btn"
+          className="sc-tb-btn sc-tablet-up"
           title="Crea avviso (Alt+A)"
           aria-label="Crea avviso"
           onClick={() => openModal('alert')}
         >
           <Bell size={15} />
-          <span>Avviso</span>
+          <span className="sc-desktop-label">Avviso</span>
         </button>
 
         {/* Bar Replay */}
         <button
           type="button"
-          className={`sc-tb-btn ${replay.active ? 'sc-tb-btn--active' : ''}`}
+          className={`sc-tb-btn sc-desktop-only ${replay.active ? 'sc-tb-btn--active' : ''}`}
           title="Bar Replay — simula candela per candela"
           aria-label="Bar replay"
           onClick={handleReplayToggle}
@@ -390,12 +395,12 @@ export function ChartTopToolbar({
           <span>Replay</span>
         </button>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-desktop-only" />
 
         {/* Undo / Redo Drawings */}
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
           title="Annulla disegno (Ctrl+Z)"
           aria-label="Annulla"
           disabled={!canUndo}
@@ -405,7 +410,7 @@ export function ChartTopToolbar({
         </button>
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
           title="Ripeti disegno (Ctrl+Y)"
           aria-label="Ripeti"
           disabled={!canRedo}
@@ -417,10 +422,34 @@ export function ChartTopToolbar({
 
       {/* Right Toolbar Actions */}
       <div className="sc-top-right">
+        {/* Mobile/Tablet Drawing Bar Quick Toggle */}
+        <button
+          type="button"
+          className={`sc-tb-btn sc-tb-btn--icon sc-mobile-only ${showDrawingBar ? 'sc-tb-btn--active' : ''}`}
+          title={showDrawingBar ? 'Nascondi strumenti di disegno' : 'Mostra strumenti di disegno'}
+          aria-label="Strumenti di disegno"
+          aria-pressed={showDrawingBar}
+          onClick={onToggleDrawingBar}
+        >
+          <PenTool size={15} />
+        </button>
+
+        {/* Mobile/Tablet Watchlist / Panels Slide-Over Toggle */}
+        <button
+          type="button"
+          className={`sc-tb-btn sc-tb-btn--icon sc-mobile-only ${rightPanel !== null ? 'sc-tb-btn--active' : ''}`}
+          title={rightPanel !== null ? 'Chiudi pannello laterale' : 'Apri Watchlist e pannelli laterali'}
+          aria-label="Watchlist e pannelli"
+          aria-pressed={rightPanel !== null}
+          onClick={() => setRightPanel(rightPanel !== null ? null : 'watchlist')}
+        >
+          <List size={16} />
+        </button>
+
         {/* Multi-chart Layout Picker */}
         <button
           type="button"
-          className={`sc-tb-btn sc-tb-btn--icon ${openMenu === 'layout' || layoutMode !== '1' ? 'sc-tb-btn--active' : ''}`}
+          className={`sc-tb-btn sc-tb-btn--icon sc-desktop-only ${openMenu === 'layout' || layoutMode !== '1' ? 'sc-tb-btn--active' : ''}`}
           title="Impostazione layout multi-grafico"
           aria-label="Impostazione layout"
           aria-haspopup="menu"
@@ -430,12 +459,12 @@ export function ChartTopToolbar({
           <LayoutGrid size={16} />
         </button>
 
-        <div className="sc-tb-divider" />
+        <div className="sc-tb-divider sc-desktop-only" />
 
         {/* Quick Theme Toggle */}
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
           title={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
           aria-label={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
           onClick={toggleTheme}
@@ -446,7 +475,7 @@ export function ChartTopToolbar({
         {/* Chart Settings */}
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-tablet-up"
           title="Impostazioni grafico"
           aria-label="Impostazioni"
           onClick={() => openModal('settings')}
@@ -457,7 +486,7 @@ export function ChartTopToolbar({
         {/* Fullscreen */}
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
           title={isFullscreen ? 'Esci da schermo intero' : 'Modalità schermo intero'}
           aria-label="Modalità schermo intero"
           onClick={handleFullscreen}
@@ -468,7 +497,7 @@ export function ChartTopToolbar({
         {/* Camera Snapshot */}
         <button
           type="button"
-          className="sc-tb-btn sc-tb-btn--icon"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
           title="Fai uno screenshot"
           aria-label="Fai uno screenshot"
           onClick={() => openModal('snapshot')}
@@ -489,7 +518,7 @@ export function ChartTopToolbar({
         {/* Pubblica Blue CTA */}
         <button
           type="button"
-          className="sc-publish-btn"
+          className="sc-publish-btn sc-desktop-only"
           title="Pubblica la tua idea o condividi snapshot"
           onClick={handlePublish}
         >
@@ -594,10 +623,80 @@ export function ChartTopToolbar({
             onClick={onToggleDrawingBar}
           >
             <span className="sc-menu-item-left">
-              <LineChart size={15} />
+              <PenTool size={15} />
               Pannello dei disegni
             </span>
             <span className={`sc-switch ${showDrawingBar ? 'sc-switch--on' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setMenuPos((prev) => ({ top: prev.top, left: 6 }));
+              setOpenMenu('style');
+            }}
+          >
+            <span className="sc-menu-item-left">
+              <ChartStyleIcon type={activePane.chartType} />
+              Stile grafico
+            </span>
+            <span className="sc-menu-kbd">{currentStyleLabel}</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setOpenMenu(null);
+              openModal('compare');
+            }}
+          >
+            <span className="sc-menu-item-left"><Plus size={15} /> Confronta simboli</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setOpenMenu(null);
+              openModal('alert');
+            }}
+          >
+            <span className="sc-menu-item-left"><Bell size={15} /> Crea avviso</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setOpenMenu(null);
+              handleReplayToggle();
+            }}
+          >
+            <span className="sc-menu-item-left"><Rewind size={15} /> {replay.active ? 'Esci da Bar Replay' : 'Bar Replay'}</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setOpenMenu(null);
+              openModal('settings');
+            }}
+          >
+            <span className="sc-menu-item-left"><Settings size={15} /> Impostazioni grafico</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            onClick={() => {
+              setOpenMenu(null);
+              openModal('snapshot');
+            }}
+          >
+            <span className="sc-menu-item-left"><Camera size={15} /> Istantanea / Condividi</span>
           </button>
 
           <button

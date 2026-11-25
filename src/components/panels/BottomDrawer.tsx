@@ -160,7 +160,10 @@ export function BottomDrawer() {
       </div>
 
       {isOpen && (
-        <div className="tv-bottom-content" style={contentHeightStyle}>
+        <div
+          className={`tv-bottom-content${bottomPanelExpanded ? ' is-expanded' : ''}`}
+          style={contentHeightStyle}
+        >
           {bottomPanel === 'screener' && <ScreenerTab />}
           {bottomPanel === 'pine' && <PineEditorTab />}
           {bottomPanel === 'strategy' && <StrategyTesterTab />}

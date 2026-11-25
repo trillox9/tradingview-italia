@@ -560,6 +560,390 @@ export function ChartCanvas({
     [rawCandles, magnetMode],
   );
 
+  // Helper: place drawing point for both mouse clicks and touch taps
+  const placeDrawingPointAt = useCallback(
+    (x: number, y: number): boolean => {
+      const layout = layoutRef.current;
+      if (!layout) return false;
+      const inMainPlot = x <= layout.plotWidth && y <= layout.mainRect.bottom;
+      if (
+        !inMainPlot ||
+        activeTool === 'crosshair' ||
+        activeTool === 'cursor' ||
+        lockDrawings
+      ) {
+        return false;
+      }
+      const pt = screenToDrawingPoint(x, y);
+      if (!pt) return false;
+      const toolType = activeTool as PersistableDrawingType;
+
+      if (toolType === 'horizontalLine' || toolType === 'verticalLine') {
+        addDrawing({
+          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          symbol: symbol.ticker,
+          timeframe: pane.timeframe,
+          type: toolType,
+          points: [pt],
+          style: {
+            color: defaultColorForTool(toolType),
+            lineWidth: 1.8,
+            lineStyle: 'solid',
+            showLabels: true,
+          },
+          locked: false,
+          visible: true,
+          createdAt: Date.now(),
+        });
+        return true;
+      }
+
+      if (toolType === 'text' || toolType === 'callout') {
+        setTextInputState({ screen: { x, y }, point: pt, value: '' });
+        return true;
+      }
+
+      if (toolType === 'brush') {
+        const draft: DrawingObject = {
+          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          symbol: symbol.ticker,
+          timeframe: pane.timeframe,
+          type: 'brush',
+          points: [pt],
+          style: { color: '#2962ff', lineWidth: 2, lineStyle: 'solid' },
+          locked: false,
+          visible: true,
+          createdAt: Date.now(),
+        };
+        setDraftDrawing(draft);
+        dragRef.current = { kind: 'brush', drawing: draft };
+        return true;
+      }
+
+      if (!draftDrawing) {
+        setDraftDrawing({
+          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          symbol: symbol.ticker,
+          timeframe: pane.timeframe,
+          type: toolType,
+          points: [pt, pt],
+          style: {
+            color: defaultColorForTool(toolType),
+            lineWidth: 2,
+            lineStyle: 'solid',
+            showLabels: true,
+          },
+          locked: false,
+          visible: true,
+          createdAt: Date.now(),
+        });
+      } else if (
+        draftDrawing.type === 'parallelChannel' &&
+        draftDrawing.points.length === 2
+      ) {
+        setDraftDrawing({
+          ...draftDrawing,
+          points: [draftDrawing.points[0], pt, pt],
+        });
+      } else {
+        const finalPts = draftDrawing.points.slice(0, -1).concat(pt);
+        const committed: DrawingObject = {
+          ...draftDrawing,
+          points: finalPts,
+        };
+        if (
+          committed.type === 'longPosition' ||
+          committed.type === 'shortPosition'
+        ) {
+          const entry = committed.points[0].price;
+          const targetRaw = committed.points[1].price;
+          const diff = Math.abs(targetRaw - entry) || entry * 0.02;
+          if (committed.type === 'longPosition') {
+            committed.targetPrice = Math.max(entry + diff * 0.25, targetRaw);
+            committed.stopPrice = entry - diff * 0.5;
+          } else {
+            committed.targetPrice = Math.min(entry - diff * 0.25, targetRaw);
+            committed.stopPrice = entry + diff * 0.5;
+          }
+        }
+        setDraftDrawing(null);
+        addDrawing(committed);
+      }
+      return true;
+    },
+    [
+      activeTool,
+      lockDrawings,
+      screenToDrawingPoint,
+      addDrawing,
+      symbol.ticker,
+      pane.timeframe,
+      draftDrawing,
+    ],
+  );
+
+  // Touch state ref for mobile pan, 2-finger pinch-to-zoom, and tap-to-draw
+  const touchRef = useRef<
+    | null
+    | {
+        kind: 'single';
+        startX: number;
+        startY: number;
+        moved: boolean;
+        isPriceAxis: boolean;
+        startVp: ViewportState;
+      }
+    | {
+        kind: 'pinch';
+        startDist: number;
+        startMidX: number;
+        startVp: ViewportState;
+      }
+    | {
+        kind: 'brush';
+        drawing: DrawingObject;
+      }
+  >(null);
+
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+
+  // Native non-passive touch listeners for smooth mobile pan & pinch-to-zoom
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const getLocal = (t: Touch) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+    };
+
+    const onTouchStart = (ev: TouchEvent) => {
+      if (ev.touches.length === 0) return;
+      ev.preventDefault();
+      onFocusPane(paneIndex);
+      const layout = layoutRef.current;
+      if (!layout) return;
+
+      if (ev.touches.length >= 2) {
+        const p0 = getLocal(ev.touches[0]);
+        const p1 = getLocal(ev.touches[1]);
+        const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+        touchRef.current = {
+          kind: 'pinch',
+          startDist: Math.max(12, dist),
+          startMidX: (p0.x + p1.x) / 2,
+          startVp: { ...viewportRef.current },
+        };
+        return;
+      }
+
+      const p = getLocal(ev.touches[0]);
+      if (activeTool === 'brush' && !lockDrawings && p.x <= layout.plotWidth && p.y <= layout.mainRect.bottom) {
+        const pt = screenToDrawingPoint(p.x, p.y);
+        if (pt) {
+          const draft: DrawingObject = {
+            id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            symbol: symbol.ticker,
+            timeframe: pane.timeframe,
+            type: 'brush',
+            points: [pt],
+            style: { color: '#2962ff', lineWidth: 2, lineStyle: 'solid' },
+            locked: false,
+            visible: true,
+            createdAt: Date.now(),
+          };
+          setDraftDrawing(draft);
+          touchRef.current = { kind: 'brush', drawing: draft };
+          return;
+        }
+      }
+
+      const isPriceAxis = p.x > layout.plotWidth && p.y < layout.mainRect.bottom;
+      if (isPriceAxis && pane.autoScale) {
+        updatePane(paneIndex, { autoScale: false });
+      }
+      touchRef.current = {
+        kind: 'single',
+        startX: p.x,
+        startY: p.y,
+        moved: false,
+        isPriceAxis,
+        startVp: { ...viewportRef.current },
+      };
+    };
+
+    const onTouchMove = (ev: TouchEvent) => {
+      const state = touchRef.current;
+      const layout = layoutRef.current;
+      if (!state || !layout || ev.touches.length === 0) return;
+      ev.preventDefault();
+
+      // Upgrade 1-finger to 2-finger pinch cleanly
+      if (ev.touches.length >= 2 && state.kind !== 'pinch') {
+        const p0 = getLocal(ev.touches[0]);
+        const p1 = getLocal(ev.touches[1]);
+        touchRef.current = {
+          kind: 'pinch',
+          startDist: Math.max(12, Math.hypot(p1.x - p0.x, p1.y - p0.y)),
+          startMidX: (p0.x + p1.x) / 2,
+          startVp: { ...viewportRef.current },
+        };
+        return;
+      }
+
+      if (state.kind === 'pinch' && ev.touches.length >= 2) {
+        const p0 = getLocal(ev.touches[0]);
+        const p1 = getLocal(ev.touches[1]);
+        const dist = Math.max(12, Math.hypot(p1.x - p0.x, p1.y - p0.y));
+        const midX = (p0.x + p1.x) / 2;
+        const scale = state.startDist / dist;
+        const nextBars = Math.max(14, Math.min(360, state.startVp.visibleBars * scale));
+        const anchorRatio = Math.max(0, Math.min(1, state.startMidX / Math.max(1, layout.plotWidth)));
+        const anchorIndex = state.startVp.rightIndex - state.startVp.visibleBars * (1 - anchorRatio);
+        const panShift = (midX - state.startMidX) / Math.max(1, layout.plotWidth / nextBars);
+        const nextRight = anchorIndex + nextBars * (1 - anchorRatio) - panShift;
+        setViewport((vp) => ({
+          ...vp,
+          visibleBars: nextBars,
+          rightIndex: Math.max(6, Math.min(rawCandles.length + nextBars * 0.65, nextRight)),
+        }));
+        return;
+      }
+
+      const p = getLocal(ev.touches[0]);
+      if (state.kind === 'brush') {
+        const pt = screenToDrawingPoint(p.x, p.y);
+        if (pt) {
+          state.drawing = { ...state.drawing, points: [...state.drawing.points, pt] };
+          setDraftDrawing(state.drawing);
+        }
+        return;
+      }
+
+      if (state.kind === 'single') {
+        const dx = p.x - state.startX;
+        const dy = p.y - state.startY;
+        if (!state.moved && Math.hypot(dx, dy) > 5) {
+          state.moved = true;
+        }
+        if (!state.moved) return;
+
+        if (state.isPriceAxis) {
+          const nextZoom = Math.max(
+            0.25,
+            Math.min(6, state.startVp.yZoom * Math.exp(-dy * 0.006)),
+          );
+          setViewport((vp) => ({ ...vp, yZoom: nextZoom }));
+        } else {
+          const deltaBars = dx / Math.max(1, layout.barStepPx);
+          const nextRight = Math.max(
+            6,
+            Math.min(
+              rawCandles.length + state.startVp.visibleBars * 0.75,
+              state.startVp.rightIndex - deltaBars,
+            ),
+          );
+          setViewport((vp) => ({
+            ...vp,
+            rightIndex: nextRight,
+            yOffset: pane.autoScale
+              ? vp.yOffset
+              : state.startVp.yOffset + dy / Math.max(80, layout.mainRect.height),
+          }));
+        }
+
+        const barIndex = Math.max(
+          0,
+          Math.min(rawCandles.length - 1, Math.round(xToIndex(p.x, layout))),
+        );
+        setCrosshair({ x: p.x, y: p.y, barIndex, visible: true });
+        if (isActivePane) {
+          setHoveredIdx(barIndex);
+          onHoverCandle?.(rawCandles[barIndex] ?? null, barIndex);
+        }
+      }
+    };
+
+    const onTouchEnd = () => {
+      const state = touchRef.current;
+      touchRef.current = null;
+      if (!state) return;
+
+      if (state.kind === 'brush') {
+        setDraftDrawing(null);
+        if (state.drawing.points.length >= 2) {
+          addDrawing(state.drawing);
+        }
+        return;
+      }
+
+      if (state.kind === 'single' && !state.moved) {
+        const layout = layoutRef.current;
+        if (!layout) return;
+        // Tap with active drawing tool places anchor point
+        if (placeDrawingPointAt(state.startX, state.startY)) {
+          return;
+        }
+        // Otherwise tap updates crosshair + selects drawing if hit
+        const barIndex = Math.max(
+          0,
+          Math.min(rawCandles.length - 1, Math.round(xToIndex(state.startX, layout))),
+        );
+        setCrosshair({ x: state.startX, y: state.startY, barIndex, visible: true });
+        if (isActivePane) {
+          setHoveredIdx(barIndex);
+          onHoverCandle?.(rawCandles[barIndex] ?? null, barIndex);
+        }
+        if (!hideDrawings && !lockDrawings) {
+          const toScreen = (pt: DrawingPoint): ScreenPoint => ({
+            x: indexToX(timeToIndex(pt.time, rawCandles), layout),
+            y: priceToY(pt.price, layout),
+          });
+          let hitId: string | null = null;
+          for (let i = paneDrawings.length - 1; i >= 0; i--) {
+            const d = paneDrawings[i];
+            if (d.locked) continue;
+            if (hitTestDrawing(d, { x: state.startX, y: state.startY }, toScreen, 12).hit) {
+              hitId = d.id;
+              break;
+            }
+          }
+          setSelectedDrawingId(hitId);
+        }
+      }
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
+    canvas.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [
+    paneIndex,
+    onFocusPane,
+    activeTool,
+    lockDrawings,
+    screenToDrawingPoint,
+    symbol.ticker,
+    pane.timeframe,
+    pane.autoScale,
+    updatePane,
+    rawCandles,
+    isActivePane,
+    onHoverCandle,
+    addDrawing,
+    placeDrawingPointAt,
+    hideDrawings,
+    paneDrawings,
+    setSelectedDrawingId,
+  ]);
+
   // Native non-passive wheel zoom anchored to cursor X
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -638,112 +1022,7 @@ export function ChartCanvas({
     }
 
     // 4) Drawing placement when a drawing tool is active
-    if (
-      inMainPlot &&
-      activeTool !== 'crosshair' &&
-      activeTool !== 'cursor' &&
-      !lockDrawings
-    ) {
-      const pt = screenToDrawingPoint(x, y);
-      if (!pt) return;
-      const toolType = activeTool as PersistableDrawingType;
-
-      // Single-click tools
-      if (toolType === 'horizontalLine' || toolType === 'verticalLine') {
-        addDrawing({
-          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          symbol: symbol.ticker,
-          timeframe: pane.timeframe,
-          type: toolType,
-          points: [pt],
-          style: {
-            color: defaultColorForTool(toolType),
-            lineWidth: 1.8,
-            lineStyle: 'solid',
-            showLabels: true,
-          },
-          locked: false,
-          visible: true,
-          createdAt: Date.now(),
-        });
-        return;
-      }
-
-      if (toolType === 'text' || toolType === 'callout') {
-        setTextInputState({ screen: { x, y }, point: pt, value: '' });
-        return;
-      }
-
-      // Freehand brush drag
-      if (toolType === 'brush') {
-        const draft: DrawingObject = {
-          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          symbol: symbol.ticker,
-          timeframe: pane.timeframe,
-          type: 'brush',
-          points: [pt],
-          style: { color: '#2962ff', lineWidth: 2, lineStyle: 'solid' },
-          locked: false,
-          visible: true,
-          createdAt: Date.now(),
-        };
-        setDraftDrawing(draft);
-        dragRef.current = { kind: 'brush', drawing: draft };
-        return;
-      }
-
-      // Multi-click tools (2-click or 3-click for parallelChannel)
-      if (!draftDrawing) {
-        setDraftDrawing({
-          id: `drw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          symbol: symbol.ticker,
-          timeframe: pane.timeframe,
-          type: toolType,
-          points: [pt, pt],
-          style: {
-            color: defaultColorForTool(toolType),
-            lineWidth: 2,
-            lineStyle: 'solid',
-            showLabels: true,
-          },
-          locked: false,
-          visible: true,
-          createdAt: Date.now(),
-        });
-      } else if (
-        draftDrawing.type === 'parallelChannel' &&
-        draftDrawing.points.length === 2
-      ) {
-        // Lock p2 and start placing p3 (channel offset)
-        setDraftDrawing({
-          ...draftDrawing,
-          points: [draftDrawing.points[0], pt, pt],
-        });
-      } else {
-        // Commit final point
-        const finalPts = draftDrawing.points.slice(0, -1).concat(pt);
-        const committed: DrawingObject = {
-          ...draftDrawing,
-          points: finalPts,
-        };
-        if (
-          committed.type === 'longPosition' ||
-          committed.type === 'shortPosition'
-        ) {
-          const entry = committed.points[0].price;
-          const targetRaw = committed.points[1].price;
-          const diff = Math.abs(targetRaw - entry) || entry * 0.02;
-          if (committed.type === 'longPosition') {
-            committed.targetPrice = Math.max(entry + diff * 0.25, targetRaw);
-            committed.stopPrice = entry - diff * 0.5;
-          } else {
-            committed.targetPrice = Math.min(entry - diff * 0.25, targetRaw);
-            committed.stopPrice = entry + diff * 0.5;
-          }
-        }
-        setDraftDrawing(null);
-        addDrawing(committed);
-      }
+    if (placeDrawingPointAt(x, y)) {
       return;
     }
 
@@ -1054,9 +1333,10 @@ export function ChartCanvas({
             <span className="sc-symbol-dot" style={{ background: symbol.logoColor }}>
               {symbol.logoText.slice(0, 2)}
             </span>
-            <span>{symbol.name}</span>
+            <span className="sc-legend-name-full">{symbol.name}</span>
+            <span className="sc-legend-name-short">{symbol.ticker}</span>
             <span className="sc-legend-meta">
-              · {pane.timeframe} · {symbol.exchange}
+              · {pane.timeframe} <span className="sc-legend-exchange">· {symbol.exchange}</span>
             </span>
           </button>
 
@@ -1074,26 +1354,26 @@ export function ChartCanvas({
 
           {legendBar && (
             <div className="sc-ohlc-row">
-              <span className="sc-ohlc-item">
+              <span className="sc-ohlc-item sc-ohlc-verbose">
                 <span className="sc-ohlc-lbl">Aper.</span>
                 <span className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}>
                   {formatPrice(legendBar.open, symbol.precision)}
                 </span>
               </span>
-              <span className="sc-ohlc-item">
+              <span className="sc-ohlc-item sc-ohlc-verbose">
                 <span className="sc-ohlc-lbl">Max.</span>
                 <span className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}>
                   {formatPrice(legendBar.high, symbol.precision)}
                 </span>
               </span>
-              <span className="sc-ohlc-item">
+              <span className="sc-ohlc-item sc-ohlc-verbose">
                 <span className="sc-ohlc-lbl">Min.</span>
                 <span className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}>
                   {formatPrice(legendBar.low, symbol.precision)}
                 </span>
               </span>
               <span className="sc-ohlc-item">
-                <span className="sc-ohlc-lbl">Chius.</span>
+                <span className="sc-ohlc-lbl sc-ohlc-verbose">Chius.</span>
                 <span className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}>
                   {formatPrice(legendBar.close, symbol.precision)}
                 </span>
