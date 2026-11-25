@@ -1,0 +1,366 @@
+/* ==========================================================================
+   TradingView Italia — Design System Tokens
+   Grounded in REA production captures of https://it.tradingview.com/ and
+   https://it.tradingview.com/markets/ (31427.9c8232e619e36ed4ce6b.css,
+   ev_f4e61e3b9d684806ea81a840b35a82e9e974d78808368d40a1cfdab305d8f6c8).
+   ========================================================================== */
+
+:root {
+  /* ------------------------------------------------------------------------
+     1. Core Primitive Palette (Observed :root tokens)
+     ------------------------------------------------------------------------ */
+  --tv-white: #ffffff;
+  --tv-black: #000000;
+
+  /* Cold Gray scale */
+  --tv-cold-gray-50: #f9f9f9;
+  --tv-cold-gray-100: #f2f2f2;
+  --tv-cold-gray-150: #ebebeb;
+  --tv-cold-gray-200: #dbdbdb;
+  --tv-cold-gray-250: #c9c9c9;
+  --tv-cold-gray-300: #b8b8b8;
+  --tv-cold-gray-350: #a8a8a8;
+  --tv-cold-gray-400: #9c9c9c;
+  --tv-cold-gray-450: #8c8c8c;
+  --tv-cold-gray-500: #808080;
+  --tv-cold-gray-550: #707070;
+  --tv-cold-gray-600: #636363;
+  --tv-cold-gray-650: #555555;
+  --tv-cold-gray-700: #464646;
+  --tv-cold-gray-750: #303030;
+  --tv-cold-gray-800: #222222;
+  --tv-cold-gray-850: #131313;
+  --tv-cold-gray-900: #000000;
+  --tv-cold-gray-950: #000000;
+
+  /* TradingView Blue scale */
+  --tv-blue-50: #e3effd;
+  --tv-blue-100: #bbd9fb;
+  --tv-blue-200: #90bff9;
+  --tv-blue-300: #5b9cf6;
+  --tv-blue-400: #3179f5;
+  --tv-blue-500: #2962ff;
+  --tv-blue-600: #1e53e5;
+  --tv-blue-700: #1848cc;
+  --tv-blue-800: #143eb2;
+  --tv-blue-900: #0c3299;
+  --tv-blue-a700: #143a87;
+  --tv-blue-a800: #142e61;
+  --tv-blue-a900: #132042;
+
+  /* Minty Green scale (Primary Up / Bullish) */
+  --tv-minty-green-50: #daf2ee;
+  --tv-minty-green-100: #ace5dc;
+  --tv-minty-green-200: #70ccbd;
+  --tv-minty-green-300: #42bda8;
+  --tv-minty-green-400: #22ab94;
+  --tv-minty-green-500: #089981;
+  --tv-minty-green-600: #06806b;
+  --tv-minty-green-700: #056656;
+  --tv-minty-green-800: #004d40;
+  --tv-minty-green-900: #00332a;
+  --tv-minty-green-a700: #1b7667;
+  --tv-minty-green-a800: #10443b;
+  --tv-minty-green-a900: #082621;
+
+  /* Ripe Red scale (Primary Down / Bearish) */
+  --tv-ripe-red-50: #ffebec;
+  --tv-ripe-red-100: #fccbcd;
+  --tv-ripe-red-200: #faa1a4;
+  --tv-ripe-red-300: #f77c80;
+  --tv-ripe-red-400: #f7525f;
+  --tv-ripe-red-500: #f23645;
+  --tv-ripe-red-600: #cc2f3c;
+  --tv-ripe-red-700: #b22833;
+  --tv-ripe-red-800: #991f29;
+  --tv-ripe-red-900: #801922;
+  --tv-ripe-red-a700: #802028;
+  --tv-ripe-red-a800: #4d191d;
+  --tv-ripe-red-a900: #331f20;
+
+  /* Forest Green (Heatmap positive scale) */
+  --tv-forest-green-100: #ace5c9;
+  --tv-forest-green-300: #42bd7f;
+  --tv-forest-green-400: #22ab67;
+  --tv-forest-green-500: #089950;
+  --tv-forest-green-700: #056636;
+  --tv-forest-green-900: #1a3326;
+
+  /* Supporting Accents */
+  --tv-tan-orange-50: #fff3e0;
+  --tv-tan-orange-400: #ffa726;
+  --tv-tan-orange-500: #ff9800;
+  --tv-tan-orange-600: #fb8c00;
+  --tv-tan-orange-a900: #33261a;
+  --tv-sky-blue-500: #00bcd4;
+  --tv-berry-pink-500: #e91e63;
+  --tv-grapes-purple-500: #9c27b0;
+
+  /* ------------------------------------------------------------------------
+     2. Typography, Radii, Layout & Z-Index Scale
+     ------------------------------------------------------------------------ */
+  --tv-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+  --tv-font-display: 'Inter', 'EuclidCircularSemibold', -apple-system, BlinkMacSystemFont, 'Trebuchet MS', sans-serif;
+  --tv-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --tv-text-2xs: 0.6875rem;   /* 11px */
+  --tv-text-xs: 0.75rem;      /* 12px / lh 16px */
+  --tv-text-sm: 0.875rem;     /* 14px / lh 18px */
+  --tv-text-md: 1rem;         /* 16px / lh 24px */
+  --tv-text-lg: 1.125rem;     /* 18px / lh 24px */
+  --tv-text-xl: 1.25rem;      /* 20px / lh 30px */
+  --tv-text-2xl: 1.75rem;     /* 28px / lh 34px */
+  --tv-text-3xl: 2.25rem;     /* 36px / lh 42px */
+  --tv-text-hero: 3.25rem;    /* 52px / lh 58px */
+
+  /* Radii (Observed frequency: 4, 6, 8, 12, 16px, pill) */
+  --tv-radius-xs: 4px;
+  --tv-radius-sm: 6px;
+  --tv-radius-md: 8px;
+  --tv-radius-lg: 12px;
+  --tv-radius-xl: 16px;
+  --tv-radius-pill: 9999px;
+
+  /* Spacing & Container Dimensions */
+  --tv-header-height: 64px;
+  --tv-container-max: 1380px;
+  --tv-container-pad: 24px;
+  --tv-section-gap: 56px;
+  --tv-card-pad: 20px;
+
+  /* Supercharts Workspace Layout Slots (ready for chart-layer overrides) */
+  --tv-chart-topbar-height: 40px;
+  --tv-chart-leftbar-width: 52px;
+  --tv-chart-rightbar-width: 44px;
+  --tv-chart-watchlist-width: 300px;
+  --tv-chart-bottombar-height: 36px;
+
+  /* Z-Index Scale */
+  --tv-z-base: 1;
+  --tv-z-sticky: 40;
+  --tv-z-header: 101;
+  --tv-z-dropdown: 200;
+  --tv-z-modal-backdrop: 300;
+  --tv-z-modal: 310;
+  --tv-z-toast: 400;
+  --tv-z-tooltip: 500;
+
+  /* Motion */
+  --tv-transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --tv-transition-base: 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ==========================================================================
+   3. Light Theme Semantic Tokens (Default :root / [data-theme="light"])
+   ========================================================================== */
+:root,
+[data-theme='light'],
+.theme-light {
+  color-scheme: light;
+
+  /* Surfaces */
+  --tv-body-bg: var(--tv-white);
+  --tv-bg-primary: var(--tv-white);
+  --tv-bg-secondary: var(--tv-cold-gray-50);
+  --tv-bg-elevated: var(--tv-white);
+  --tv-bg-hover: var(--tv-cold-gray-100);
+  --tv-bg-active: var(--tv-cold-gray-150);
+  --tv-bg-subtle: var(--tv-cold-gray-100);
+  --tv-bg-chip: var(--tv-cold-gray-100);
+  --tv-bg-chip-hover: var(--tv-cold-gray-150);
+  --tv-bg-contrast: var(--tv-black);
+  --tv-text-contrast: var(--tv-white);
+  --tv-header-bg: rgba(255, 255, 255, 0.96);
+  --tv-modal-backdrop: rgba(0, 0, 0, 0.45);
+
+  /* Borders & Dividers */
+  --tv-border: var(--tv-cold-gray-150);
+  --tv-border-card: var(--tv-cold-gray-150);
+  --tv-border-subtle: var(--tv-cold-gray-100);
+  --tv-border-strong: var(--tv-cold-gray-200);
+  --tv-border-hover: var(--tv-cold-gray-300);
+
+  /* Text */
+  --tv-text-primary: var(--tv-cold-gray-900);
+  --tv-text-heading: var(--tv-cold-gray-900);
+  --tv-text-secondary: var(--tv-cold-gray-550);
+  --tv-text-muted: var(--tv-cold-gray-450);
+
+  /* Brand & Links */
+  --tv-brand: var(--tv-blue-500);
+  --tv-brand-hover: var(--tv-blue-600);
+  --tv-brand-active: var(--tv-blue-700);
+  --tv-brand-soft: var(--tv-blue-50);
+  --tv-brand-soft-text: var(--tv-blue-600);
+  --tv-link: var(--tv-blue-500);
+  --tv-link-hover: var(--tv-blue-600);
+  --tv-focus-ring: rgba(41, 98, 255, 0.35);
+
+  /* Market Sentiment (Up / Down / Warning) */
+  --tv-up: var(--tv-minty-green-600);
+  --tv-up-solid: var(--tv-minty-green-500);
+  --tv-up-hover: var(--tv-minty-green-600);
+  --tv-up-bg: var(--tv-minty-green-50);
+  --tv-up-bg-strong: var(--tv-minty-green-100);
+  --tv-up-area-top: rgba(8, 153, 129, 0.30);
+  --tv-up-area-bottom: rgba(8, 153, 129, 0.02);
+
+  --tv-down: var(--tv-ripe-red-600);
+  --tv-down-solid: var(--tv-ripe-red-500);
+  --tv-down-hover: var(--tv-ripe-red-600);
+  --tv-down-bg: var(--tv-ripe-red-50);
+  --tv-down-bg-strong: var(--tv-ripe-red-100);
+  --tv-down-area-top: rgba(204, 47, 60, 0.30);
+  --tv-down-area-bottom: rgba(204, 47, 60, 0.02);
+
+  --tv-warning: var(--tv-tan-orange-500);
+  --tv-warning-bg: var(--tv-tan-orange-50);
+  --tv-info: var(--tv-sky-blue-500);
+
+  /* Heatmap Classic Scale (Light) */
+  --tv-hm-pos-1: var(--tv-forest-green-100);
+  --tv-hm-pos-2: var(--tv-forest-green-300);
+  --tv-hm-pos-3: var(--tv-forest-green-500);
+  --tv-hm-pos-4: var(--tv-forest-green-700);
+  --tv-hm-neg-1: var(--tv-ripe-red-100);
+  --tv-hm-neg-2: var(--tv-ripe-red-300);
+  --tv-hm-neg-3: var(--tv-ripe-red-500);
+  --tv-hm-neg-4: var(--tv-ripe-red-700);
+  --tv-hm-neutral: var(--tv-cold-gray-200);
+
+  /* Chart & Supercharts Workspace Tokens (Light) */
+  --tv-chart-bg: #ffffff;
+  --tv-chart-pane-bg: #ffffff;
+  --tv-chart-grid: #f0f3fa;
+  --tv-chart-crosshair: #8c8c8c;
+  --tv-chart-axis-text: #707070;
+  --tv-chart-axis-border: #ebebeb;
+  --tv-toolbar-bg: #ffffff;
+  --tv-toolbar-border: #ebebeb;
+  --tv-toolbar-hover: #f2f2f2;
+  --tv-toolbar-active-bg: #e3effd;
+  --tv-toolbar-active-text: #2962ff;
+
+  /* Tooltip, Shadows & Scrollbars */
+  --tv-tooltip-bg: var(--tv-cold-gray-800);
+  --tv-tooltip-text: var(--tv-cold-gray-100);
+  --tv-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --tv-shadow-md: 0 0 2px 0 var(--tv-cold-gray-200), 0 3px 9px 0 var(--tv-cold-gray-150);
+  --tv-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --tv-shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.22);
+  --tv-scrollbar-thumb: var(--tv-cold-gray-200);
+  --tv-scrollbar-thumb-hover: var(--tv-cold-gray-300);
+}
+
+/* ==========================================================================
+   4. Dark Theme Semantic Tokens ([data-theme="dark"] & initial .theme-dark)
+   ========================================================================== */
+[data-theme='dark'],
+html.theme-dark:not([data-theme='light']) {
+  color-scheme: dark;
+
+  /* Surfaces (Observed: body #000, primary surface #131313, hover #222) */
+  --tv-body-bg: var(--tv-black);
+  --tv-bg-primary: var(--tv-cold-gray-850);
+  --tv-bg-secondary: #0a0a0a;
+  --tv-bg-elevated: #171717;
+  --tv-bg-hover: var(--tv-cold-gray-800);
+  --tv-bg-active: var(--tv-cold-gray-750);
+  --tv-bg-subtle: #181818;
+  --tv-bg-chip: var(--tv-cold-gray-800);
+  --tv-bg-chip-hover: var(--tv-cold-gray-750);
+  --tv-bg-contrast: var(--tv-white);
+  --tv-text-contrast: var(--tv-black);
+  --tv-header-bg: rgba(0, 0, 0, 0.94);
+  --tv-modal-backdrop: rgba(0, 0, 0, 0.72);
+
+  /* Borders & Dividers */
+  --tv-border: var(--tv-cold-gray-750);
+  --tv-border-card: #2c2c2c;
+  --tv-border-subtle: var(--tv-cold-gray-800);
+  --tv-border-strong: var(--tv-cold-gray-700);
+  --tv-border-hover: var(--tv-cold-gray-600);
+
+  /* Text */
+  --tv-text-primary: var(--tv-cold-gray-200);
+  --tv-text-heading: var(--tv-white);
+  --tv-text-secondary: var(--tv-cold-gray-450);
+  --tv-text-muted: var(--tv-cold-gray-550);
+
+  /* Brand & Links */
+  --tv-brand: var(--tv-blue-500);
+  --tv-brand-hover: var(--tv-blue-600);
+  --tv-brand-active: var(--tv-blue-700);
+  --tv-brand-soft: var(--tv-blue-a900);
+  --tv-brand-soft-text: var(--tv-blue-200);
+  --tv-link: var(--tv-blue-300);
+  --tv-link-hover: var(--tv-blue-400);
+  --tv-focus-ring: rgba(91, 156, 246, 0.45);
+
+  /* Market Sentiment (Up / Down / Warning) */
+  --tv-up: var(--tv-minty-green-400);
+  --tv-up-solid: var(--tv-minty-green-500);
+  --tv-up-hover: var(--tv-minty-green-600);
+  --tv-up-bg: var(--tv-minty-green-a900);
+  --tv-up-bg-strong: var(--tv-minty-green-a800);
+  --tv-up-area-top: rgba(34, 171, 148, 0.30);
+  --tv-up-area-bottom: rgba(34, 171, 148, 0.02);
+
+  --tv-down: var(--tv-ripe-red-400);
+  --tv-down-solid: var(--tv-ripe-red-500);
+  --tv-down-hover: var(--tv-ripe-red-600);
+  --tv-down-bg: var(--tv-ripe-red-a900);
+  --tv-down-bg-strong: var(--tv-ripe-red-a800);
+  --tv-down-area-top: rgba(242, 54, 69, 0.30);
+  --tv-down-area-bottom: rgba(242, 54, 69, 0.02);
+
+  --tv-warning: var(--tv-tan-orange-500);
+  --tv-warning-bg: var(--tv-tan-orange-a900);
+  --tv-info: var(--tv-sky-blue-500);
+
+  /* Heatmap Classic Scale (Dark) */
+  --tv-hm-pos-1: var(--tv-forest-green-900);
+  --tv-hm-pos-2: var(--tv-forest-green-700);
+  --tv-hm-pos-3: var(--tv-forest-green-500);
+  --tv-hm-pos-4: var(--tv-forest-green-400);
+  --tv-hm-neg-1: var(--tv-ripe-red-900);
+  --tv-hm-neg-2: var(--tv-ripe-red-700);
+  --tv-hm-neg-3: var(--tv-ripe-red-500);
+  --tv-hm-neg-4: var(--tv-ripe-red-400);
+  --tv-hm-neutral: var(--tv-cold-gray-750);
+
+  /* Chart & Supercharts Workspace Tokens (Dark — REA 2026 obsidian neutral) */
+  --tv-chart-bg: #000000;
+  --tv-chart-pane-bg: #000000;
+  --tv-chart-grid: rgba(255, 255, 255, 0.06);
+  --tv-chart-crosshair: #8c8c8c;
+  --tv-chart-axis-text: #8c8c8c;
+  --tv-chart-axis-border: #303030;
+  --tv-toolbar-bg: #000000;
+  --tv-toolbar-border: #303030;
+  --tv-toolbar-hover: #222222;
+  --tv-toolbar-active-bg: #132042;
+  --tv-toolbar-active-text: #2962ff;
+
+  /* Tooltip, Shadows & Scrollbars */
+  --tv-tooltip-bg: var(--tv-cold-gray-750);
+  --tv-tooltip-text: var(--tv-cold-gray-100);
+  --tv-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --tv-shadow-md: 0 0 2px 0 rgba(0, 0, 0, 0.9), 0 4px 12px 0 rgba(0, 0, 0, 0.65);
+  --tv-shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.55);
+  --tv-shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.78);
+  --tv-scrollbar-thumb: var(--tv-cold-gray-700);
+  --tv-scrollbar-thumb-hover: var(--tv-cold-gray-600);
+}
+
+/* ==========================================================================
+   5. Supercharts Extension Layer (Hook point for chart-specific tokens)
+   ========================================================================== */
+:root {
+  --tv-candle-up: var(--tv-minty-green-500);
+  --tv-candle-down: var(--tv-ripe-red-500);
+  --tv-volume-up: rgba(8, 153, 129, 0.38);
+  --tv-volume-down: rgba(242, 54, 69, 0.38);
+  --tv-buy-button: var(--tv-blue-500);
+  --tv-sell-button: var(--tv-ripe-red-500);
+}

@@ -1,0 +1,928 @@
+/* ==========================================================================
+   TradingView Italia — Global Styles & UI Primitives
+   Layered cleanly on top of ./tokens.css for Homepage, Markets, Screener,
+   Heatmap, Calendar, Community, and Supercharts Workspace views.
+   ========================================================================== */
+
+@import './tokens.css';
+
+/* --------------------------------------------------------------------------
+   1. Modern Reset & Base Defaults
+   -------------------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+  text-size-adjust: 100%;
+  background-color: var(--tv-body-bg);
+  color: var(--tv-text-primary);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: var(--tv-body-bg);
+  color: var(--tv-text-primary);
+  font-family: var(--tv-font-sans);
+  font-size: var(--tv-text-sm);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+ul,
+ol,
+figure {
+  margin: 0;
+  padding: 0;
+}
+
+ul,
+ol {
+  list-style: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+:focus-visible {
+  outline: 2px solid var(--tv-brand);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   2. Sleek TradingView Scrollbars
+   -------------------------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--tv-scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--tv-scrollbar-thumb);
+  border-radius: var(--tv-radius-pill);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--tv-scrollbar-thumb-hover);
+}
+
+.tv-no-scrollbar {
+  scrollbar-width: none;
+}
+
+.tv-no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   3. Typography & Numeric Helpers
+   -------------------------------------------------------------------------- */
+.tv-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+.tv-mono {
+  font-family: var(--tv-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-heading-1 {
+  font-family: var(--tv-font-display);
+  font-size: var(--tv-text-hero);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--tv-text-heading);
+}
+
+.tv-heading-2 {
+  font-family: var(--tv-font-display);
+  font-size: var(--tv-text-2xl);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--tv-text-heading);
+}
+
+.tv-heading-3 {
+  font-family: var(--tv-font-display);
+  font-size: var(--tv-text-xl);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--tv-text-heading);
+}
+
+.tv-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--tv-font-display);
+  font-size: var(--tv-text-2xl);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--tv-text-heading);
+  transition: color var(--tv-transition-fast);
+}
+
+.tv-section-heading:hover {
+  color: var(--tv-brand);
+}
+
+.tv-section-subheading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--tv-font-display);
+  font-size: var(--tv-text-xl);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--tv-text-heading);
+  transition: color var(--tv-transition-fast);
+}
+
+.tv-section-subheading:hover {
+  color: var(--tv-brand);
+}
+
+.tv-section-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-link);
+  transition: color var(--tv-transition-fast);
+}
+
+.tv-section-link:hover {
+  color: var(--tv-link-hover);
+}
+
+.tv-text-secondary {
+  color: var(--tv-text-secondary);
+}
+
+.tv-text-muted {
+  color: var(--tv-text-muted);
+}
+
+.tv-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tv-line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   4. Layout Containers, Bento Grids & Cards
+   -------------------------------------------------------------------------- */
+.tv-container {
+  width: 100%;
+  max-width: var(--tv-container-max);
+  margin-inline: auto;
+  padding-inline: var(--tv-container-pad);
+}
+
+.tv-section {
+  padding-block: 36px;
+}
+
+.tv-bento-asymmetric {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.tv-bento-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.tv-bento-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.tv-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tv-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tv-card {
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  border-radius: var(--tv-radius-xl);
+  padding: var(--tv-card-pad);
+  transition: border-color var(--tv-transition-fast), background-color var(--tv-transition-fast);
+}
+
+.tv-card-compact {
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  border-radius: var(--tv-radius-lg);
+  padding: 14px 16px;
+  transition: border-color var(--tv-transition-fast), background-color var(--tv-transition-fast);
+}
+
+.tv-card-interactive {
+  cursor: pointer;
+}
+
+.tv-card-interactive:hover {
+  border-color: var(--tv-border-hover);
+}
+
+.tv-divider {
+  width: 100%;
+  height: 1px;
+  background-color: var(--tv-border);
+  border: 0;
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   5. Buttons & Interactive Controls
+   -------------------------------------------------------------------------- */
+.tv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--tv-radius-md);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast),
+    color var(--tv-transition-fast),
+    transform var(--tv-transition-fast);
+}
+
+.tv-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--tv-text-xs);
+  border-radius: var(--tv-radius-sm);
+}
+
+.tv-btn-lg {
+  height: 44px;
+  padding: 0 22px;
+  font-size: var(--tv-text-md);
+  font-weight: 600;
+  border-radius: var(--tv-radius-lg);
+}
+
+.tv-btn-primary {
+  background-color: var(--tv-brand);
+  color: var(--tv-white);
+}
+
+.tv-btn-primary:hover:not(:disabled) {
+  background-color: var(--tv-brand-hover);
+}
+
+.tv-btn-primary:active:not(:disabled) {
+  background-color: var(--tv-brand-active);
+}
+
+.tv-btn-contrast {
+  background-color: var(--tv-bg-contrast);
+  color: var(--tv-text-contrast);
+  font-weight: 600;
+}
+
+.tv-btn-contrast:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.tv-btn-secondary {
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-heading);
+  border: 1px solid var(--tv-border);
+}
+
+.tv-btn-secondary:hover:not(:disabled) {
+  background-color: var(--tv-bg-chip-hover);
+  border-color: var(--tv-border-hover);
+}
+
+.tv-btn-ghost {
+  background-color: transparent;
+  color: var(--tv-text-primary);
+}
+
+.tv-btn-ghost:hover:not(:disabled) {
+  background-color: var(--tv-bg-hover);
+  color: var(--tv-text-heading);
+}
+
+.tv-btn-pill {
+  border-radius: var(--tv-radius-pill);
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-primary);
+  padding: 0 16px;
+}
+
+.tv-btn-pill:hover:not(:disabled) {
+  background-color: var(--tv-bg-chip-hover);
+  color: var(--tv-text-heading);
+}
+
+.tv-btn-pill.is-active,
+.tv-btn-pill[aria-selected='true'] {
+  background-color: var(--tv-bg-contrast);
+  color: var(--tv-text-contrast);
+  font-weight: 600;
+}
+
+.tv-btn-up {
+  background-color: var(--tv-up-solid);
+  color: var(--tv-white);
+  font-weight: 600;
+}
+
+.tv-btn-up:hover:not(:disabled) {
+  background-color: var(--tv-up-hover);
+}
+
+.tv-btn-down {
+  background-color: var(--tv-down-solid);
+  color: var(--tv-white);
+  font-weight: 600;
+}
+
+.tv-btn-down:hover:not(:disabled) {
+  background-color: var(--tv-down-hover);
+}
+
+.tv-btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--tv-radius-md);
+  color: var(--tv-text-primary);
+}
+
+.tv-btn-icon:hover:not(:disabled) {
+  background-color: var(--tv-bg-hover);
+  color: var(--tv-text-heading);
+}
+
+/* --------------------------------------------------------------------------
+   6. Delta Pills, Ticker Badges & Symbol Avatars
+   -------------------------------------------------------------------------- */
+.tv-delta-up {
+  color: var(--tv-up);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-delta-down {
+  color: var(--tv-down);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tv-delta-neutral {
+  color: var(--tv-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Solid percentage pill used in Gainers / Losers tables (REA observed) */
+.tv-pill-up,
+.tv-pill-down,
+.tv-pill-neutral {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--tv-radius-sm);
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.tv-pill-up {
+  background-color: var(--tv-up-solid);
+  color: var(--tv-white);
+}
+
+.tv-pill-down {
+  background-color: var(--tv-down-solid);
+  color: var(--tv-white);
+}
+
+.tv-pill-neutral {
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-secondary);
+}
+
+/* Neutral ticker badge pill (e.g. FTMIB, STLAM, SPX) */
+.tv-ticker-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--tv-radius-xs);
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-primary);
+  font-size: var(--tv-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* Micro uppercase tag (STOCK, FOREX, SPOT CRYPTO, FUTURES) */
+.tv-micro-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--tv-radius-xs);
+  background-color: var(--tv-bg-subtle);
+  color: var(--tv-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Orange superscript delayed-data indicator "D" */
+.tv-delayed-badge {
+  display: inline-block;
+  margin-left: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--tv-warning);
+  vertical-align: super;
+  line-height: 1;
+}
+
+/* Green INDICATORE / STRATEGIA pill badge */
+.tv-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--tv-radius-xs);
+  background-color: var(--tv-up-bg);
+  color: var(--tv-up);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tv-long-badge,
+.tv-short-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--tv-radius-pill);
+  color: var(--tv-white);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tv-long-badge {
+  background-color: var(--tv-up-solid);
+}
+
+.tv-short-badge {
+  background-color: var(--tv-down-solid);
+}
+
+.tv-symbol-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--tv-radius-pill);
+  font-size: var(--tv-text-xs);
+  font-weight: 700;
+  color: var(--tv-white);
+  flex-shrink: 0;
+  letter-spacing: -0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   7. Sticky Category Pill Bar, Tabs & Segmented Controls
+   -------------------------------------------------------------------------- */
+.tv-sticky-pillbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border-radius: var(--tv-radius-pill);
+  background-color: var(--tv-bg-elevated);
+  border: 1px solid var(--tv-border);
+  box-shadow: var(--tv-shadow-md);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tv-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--tv-radius-md);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-text-secondary);
+  transition: background-color var(--tv-transition-fast), color var(--tv-transition-fast);
+}
+
+.tv-tab:hover {
+  color: var(--tv-text-heading);
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-tab.is-active,
+.tv-tab[aria-selected='true'] {
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-heading);
+  font-weight: 600;
+}
+
+.tv-segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: var(--tv-radius-md);
+  background-color: var(--tv-bg-chip);
+  border: 1px solid var(--tv-border-subtle);
+}
+
+.tv-segmented-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--tv-radius-sm);
+  font-size: var(--tv-text-xs);
+  font-weight: 500;
+  color: var(--tv-text-secondary);
+  transition: background-color var(--tv-transition-fast), color var(--tv-transition-fast);
+}
+
+.tv-segmented-btn.is-active {
+  background-color: var(--tv-bg-elevated);
+  color: var(--tv-text-heading);
+  font-weight: 600;
+  box-shadow: var(--tv-shadow-sm);
+}
+
+/* --------------------------------------------------------------------------
+   8. Dropdown Menus, Popovers, Modals & Toasts
+   -------------------------------------------------------------------------- */
+.tv-dropdown {
+  position: absolute;
+  min-width: 240px;
+  padding: 8px;
+  background-color: var(--tv-bg-elevated);
+  border: 1px solid var(--tv-border);
+  border-radius: var(--tv-radius-lg);
+  box-shadow: var(--tv-shadow-lg);
+  z-index: var(--tv-z-dropdown);
+  animation: tv-fade-in 120ms ease-out;
+}
+
+.tv-dropdown-group {
+  padding: 10px 10px 4px;
+  font-size: var(--tv-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tv-text-muted);
+}
+
+.tv-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--tv-radius-md);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-text-heading);
+  text-align: left;
+  transition: background-color var(--tv-transition-fast);
+}
+
+.tv-dropdown-item:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-dropdown-sep {
+  height: 1px;
+  margin: 6px 0;
+  background-color: var(--tv-border);
+}
+
+.tv-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 64px 16px 24px;
+  background-color: var(--tv-modal-backdrop);
+  backdrop-filter: blur(4px);
+  z-index: var(--tv-z-modal-backdrop);
+  animation: tv-fade-in 140ms ease-out;
+}
+
+.tv-modal {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 104px);
+  display: flex;
+  flex-direction: column;
+  background-color: var(--tv-bg-elevated);
+  border: 1px solid var(--tv-border);
+  border-radius: var(--tv-radius-xl);
+  box-shadow: var(--tv-shadow-modal);
+  z-index: var(--tv-z-modal);
+  overflow: hidden;
+}
+
+.tv-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--tv-border);
+}
+
+.tv-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 18px;
+}
+
+.tv-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--tv-radius-lg);
+  background-color: var(--tv-bg-elevated);
+  border: 1px solid var(--tv-border);
+  box-shadow: var(--tv-shadow-lg);
+  color: var(--tv-text-heading);
+  font-size: var(--tv-text-sm);
+  z-index: var(--tv-z-toast);
+}
+
+/* --------------------------------------------------------------------------
+   9. Data Rows, Live Flash & Skeleton Utilities
+   -------------------------------------------------------------------------- */
+.tv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 8px;
+  border-radius: var(--tv-radius-md);
+  transition: background-color var(--tv-transition-fast);
+}
+
+.tv-row:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-row-bordered {
+  border-bottom: 1px solid var(--tv-border-subtle);
+  border-radius: 0;
+}
+
+.tv-row-bordered:last-child {
+  border-bottom: none;
+}
+
+.tv-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--tv-bg-subtle) 25%,
+    var(--tv-bg-hover) 50%,
+    var(--tv-bg-subtle) 75%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--tv-radius-sm);
+  animation: tv-shimmer 1.4s infinite linear;
+}
+
+@keyframes tv-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tv-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes tv-flash-up-kf {
+  0% {
+    background-color: var(--tv-up-bg-strong);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes tv-flash-down-kf {
+  0% {
+    background-color: var(--tv-down-bg-strong);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.tv-flash-up {
+  animation: tv-flash-up-kf 600ms ease-out;
+}
+
+.tv-flash-down {
+  animation: tv-flash-down-kf 600ms ease-out;
+}
+
+/* --------------------------------------------------------------------------
+   10. Responsive Breakpoints (1440px default, 1200px, 960px, 640px)
+   -------------------------------------------------------------------------- */
+@media (max-width: 1200px) {
+  :root {
+    --tv-container-pad: 20px;
+  }
+
+  .tv-grid-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tv-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  :root {
+    --tv-text-hero: 2.375rem;
+    --tv-text-2xl: 1.5rem;
+    --tv-section-gap: 40px;
+  }
+
+  .tv-bento-asymmetric,
+  .tv-bento-3,
+  .tv-bento-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tv-grid-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --tv-container-pad: 14px;
+    --tv-card-pad: 14px;
+    --tv-header-height: 56px;
+    --tv-text-hero: 1.875rem;
+    --tv-text-2xl: 1.375rem;
+  }
+
+  .tv-grid-4,
+  .tv-grid-5 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tv-modal-backdrop {
+    padding: 16px 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

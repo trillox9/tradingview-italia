@@ -1,0 +1,1291 @@
+/* ==========================================================================
+   TradingView Italia — Homepage, Markets Overview & Navigation Shell Styles
+   Built on ./tokens.css and ./global.css following REA_HOME_EVIDENCE.md.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Sticky Site Header (64px, adaptive transparent-over-hero -> solid)
+   -------------------------------------------------------------------------- */
+.tv-site-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--tv-z-header);
+  height: var(--tv-header-height);
+  width: 100%;
+  background-color: var(--tv-header-bg);
+  border-bottom: 1px solid var(--tv-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    background-color var(--tv-transition-base),
+    border-color var(--tv-transition-base),
+    color var(--tv-transition-base);
+}
+
+.tv-site-header.is-over-hero {
+  position: fixed;
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+  border-bottom-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color: #ffffff;
+}
+
+.tv-site-header__inner {
+  height: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tv-site-header__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.tv-brand-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--tv-font-display);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--tv-text-heading);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tv-site-header.is-over-hero .tv-brand-logo {
+  color: #ffffff;
+}
+
+.tv-header-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  min-width: 185px;
+  padding: 0 14px;
+  border-radius: var(--tv-radius-pill);
+  background-color: var(--tv-bg-chip);
+  border: 1px solid transparent;
+  color: var(--tv-text-secondary);
+  font-size: var(--tv-text-sm);
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast),
+    color var(--tv-transition-fast);
+}
+
+.tv-header-search-btn:hover {
+  background-color: var(--tv-bg-chip-hover);
+  color: var(--tv-text-heading);
+}
+
+.tv-site-header.is-over-hero .tv-header-search-btn {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(12px) saturate(1.4);
+}
+
+.tv-site-header.is-over-hero .tv-header-search-btn:hover {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.tv-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tv-header-nav__item {
+  position: relative;
+}
+
+.tv-header-nav__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--tv-radius-pill);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-text-heading);
+  white-space: nowrap;
+  transition:
+    background-color var(--tv-transition-fast),
+    color var(--tv-transition-fast);
+}
+
+.tv-header-nav__trigger:hover,
+.tv-header-nav__trigger.is-open {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-header-nav__trigger.is-active {
+  color: var(--tv-brand);
+  font-weight: 600;
+}
+
+.tv-site-header.is-over-hero .tv-header-nav__trigger {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.tv-site-header.is-over-hero .tv-header-nav__trigger:hover,
+.tv-site-header.is-over-hero .tv-header-nav__trigger.is-open {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.tv-site-header.is-over-hero .tv-header-nav__trigger.is-active {
+  color: #5b9cf6;
+}
+
+.tv-nav-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 276px;
+  padding: 8px;
+  background-color: var(--tv-bg-elevated);
+  border: 1px solid var(--tv-border);
+  border-radius: var(--tv-radius-lg);
+  box-shadow: var(--tv-shadow-lg);
+  z-index: var(--tv-z-dropdown);
+  color: var(--tv-text-heading);
+  animation: tv-fade-in 120ms ease-out;
+}
+
+.tv-nav-dropdown--right {
+  left: auto;
+  right: 0;
+  min-width: 224px;
+}
+
+.tv-nav-dropdown__hero-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--tv-radius-md);
+  text-align: left;
+  transition: background-color var(--tv-transition-fast);
+}
+
+.tv-nav-dropdown__hero-item:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-nav-dropdown__hero-title {
+  font-size: var(--tv-text-sm);
+  font-weight: 600;
+  color: var(--tv-text-heading);
+  line-height: 1.25;
+}
+
+.tv-nav-dropdown__hero-sub {
+  font-size: var(--tv-text-xs);
+  color: var(--tv-text-secondary);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+.tv-site-header__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tv-header-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: var(--tv-radius-pill);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-text-heading);
+  transition: background-color var(--tv-transition-fast), color var(--tv-transition-fast);
+}
+
+.tv-header-icon-btn:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-site-header.is-over-hero .tv-header-icon-btn {
+  color: #ffffff;
+}
+
+.tv-site-header.is-over-hero .tv-header-icon-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.tv-header-cta {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--tv-radius-pill);
+  background: linear-gradient(135deg, #2962ff 0%, #1e53e5 100%);
+  color: #ffffff;
+  font-size: var(--tv-text-sm);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  box-shadow: 0 2px 10px rgba(41, 98, 255, 0.35);
+  transition: transform var(--tv-transition-fast), filter var(--tv-transition-fast);
+}
+
+.tv-header-cta:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.tv-theme-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  border-radius: var(--tv-radius-pill);
+  background-color: var(--tv-cold-gray-400);
+  transition: background-color var(--tv-transition-fast);
+  margin-left: auto;
+}
+
+.tv-theme-switch.is-on {
+  background-color: var(--tv-brand);
+}
+
+.tv-theme-switch__thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  transition: transform var(--tv-transition-fast);
+}
+
+.tv-theme-switch.is-on .tv-theme-switch__thumb {
+  transform: translateX(16px);
+}
+
+/* --------------------------------------------------------------------------
+   2. Atmospheric TradingView Hero (Dark canvas, Look First / Then Leap)
+   -------------------------------------------------------------------------- */
+.tv-hero {
+  position: relative;
+  min-height: 620px;
+  padding: 128px 24px 72px;
+  background-color: #000000;
+  color: #ffffff;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.tv-hero__backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 68% 55% at 50% 18%, rgba(41, 98, 255, 0.28) 0%, rgba(19, 32, 66, 0.16) 45%, transparent 72%),
+    radial-gradient(ellipse 46% 36% at 82% 72%, rgba(8, 153, 129, 0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 42% 34% at 16% 78%, rgba(124, 77, 255, 0.16) 0%, transparent 65%),
+    linear-gradient(180deg, #05070e 0%, #000000 100%);
+}
+
+.tv-hero__grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000 15%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 45%, #000 15%, transparent 80%);
+}
+
+.tv-hero__content {
+  position: relative;
+  z-index: 2;
+  max-width: 860px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tv-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--tv-radius-pill);
+  background-color: rgba(41, 98, 255, 0.16);
+  border: 1px solid rgba(91, 156, 246, 0.35);
+  color: #90bff9;
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 22px;
+}
+
+.tv-hero__title {
+  font-family: var(--tv-font-display);
+  font-size: clamp(2.5rem, 5.5vw, 4.5rem);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+  color: #ffffff;
+  margin-bottom: 18px;
+}
+
+.tv-hero__title-accent {
+  background: linear-gradient(90deg, #5b9cf6 0%, #2962ff 45%, #22ab94 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.tv-hero__subtitle {
+  max-width: 620px;
+  font-size: clamp(1rem, 1.5vw, 1.25rem);
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+  margin-bottom: 30px;
+}
+
+.tv-hero__search-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 580px;
+  height: 54px;
+  padding: 0 8px 0 20px;
+  border-radius: var(--tv-radius-pill);
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.85);
+  margin-bottom: 22px;
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast),
+    box-shadow var(--tv-transition-fast);
+}
+
+.tv-hero__search-pill:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  border-color: rgba(91, 156, 246, 0.65);
+  box-shadow: 0 0 0 4px rgba(41, 98, 255, 0.2);
+}
+
+.tv-hero__search-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--tv-text-md);
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.tv-hero__search-kbd {
+  padding: 4px 10px;
+  border-radius: var(--tv-radius-pill);
+  background-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: var(--tv-text-xs);
+  font-family: var(--tv-font-mono);
+}
+
+.tv-hero__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.tv-hero__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--tv-radius-pill);
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-size: var(--tv-text-xs);
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast),
+    transform var(--tv-transition-fast);
+}
+
+.tv-hero__chip:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.tv-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.tv-hero__cta-primary {
+  height: 46px;
+  padding: 0 26px;
+  border-radius: var(--tv-radius-pill);
+  background: linear-gradient(135deg, #2962ff 0%, #1e53e5 100%);
+  color: #ffffff;
+  font-size: var(--tv-text-md);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 8px 28px rgba(41, 98, 255, 0.42);
+  transition: transform var(--tv-transition-fast), filter var(--tv-transition-fast);
+}
+
+.tv-hero__cta-primary:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.tv-hero__cta-secondary {
+  height: 46px;
+  padding: 0 22px;
+  border-radius: var(--tv-radius-pill);
+  background-color: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  font-size: var(--tv-text-md);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color var(--tv-transition-fast);
+}
+
+.tv-hero__cta-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.tv-hero__scroll-cue {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.55);
+  transition: color var(--tv-transition-fast), transform var(--tv-transition-fast);
+}
+
+.tv-hero__scroll-cue:hover {
+  color: #ffffff;
+  transform: translateX(-50%) translateY(3px);
+}
+
+/* --------------------------------------------------------------------------
+   3. Sticky Category Pill Bar
+   -------------------------------------------------------------------------- */
+.tv-sticky-nav-wrap {
+  position: sticky;
+  top: calc(var(--tv-header-height) + 12px);
+  z-index: var(--tv-z-sticky);
+  display: flex;
+  justify-content: center;
+  padding: 16px 16px 0;
+  pointer-events: none;
+}
+
+.tv-sticky-nav-wrap .tv-sticky-pillbar {
+  pointer-events: auto;
+}
+
+.tv-sticky-pill-item {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--tv-radius-pill);
+  font-size: var(--tv-text-sm);
+  font-weight: 500;
+  color: var(--tv-text-primary);
+  white-space: nowrap;
+  transition: background-color var(--tv-transition-fast), color var(--tv-transition-fast);
+}
+
+.tv-sticky-pill-item:hover {
+  background-color: var(--tv-bg-hover);
+  color: var(--tv-text-heading);
+}
+
+.tv-sticky-pill-item.is-active {
+  background-color: var(--tv-bg-contrast);
+  color: var(--tv-text-contrast);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   4. Market Summary Bento & Interactive MiniAreaChart
+   -------------------------------------------------------------------------- */
+.tv-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.tv-summary-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.tv-featured-chart-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tv-featured-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tv-featured-price-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.tv-featured-price {
+  font-family: var(--tv-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--tv-text-heading);
+}
+
+.tv-featured-unit {
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  color: var(--tv-text-secondary);
+}
+
+.tv-featured-delta {
+  font-size: var(--tv-text-md);
+  font-weight: 600;
+}
+
+.tv-mini-chart-wrap {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.tv-mini-chart-svg {
+  width: 100%;
+  display: block;
+  overflow: visible;
+}
+
+.tv-mini-chart-tooltip {
+  position: absolute;
+  top: 8px;
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: var(--tv-radius-md);
+  background-color: var(--tv-tooltip-bg);
+  color: var(--tv-tooltip-text);
+  font-size: var(--tv-text-xs);
+  box-shadow: var(--tv-shadow-md);
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.tv-mini-chart-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.tv-range-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tv-range-pill {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--tv-radius-sm);
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  color: var(--tv-text-secondary);
+  transition: background-color var(--tv-transition-fast), color var(--tv-transition-fast);
+}
+
+.tv-range-pill:hover {
+  background-color: var(--tv-bg-hover);
+  color: var(--tv-text-heading);
+}
+
+.tv-range-pill.is-active {
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-heading);
+}
+
+.tv-ticker-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tv-ticker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: var(--tv-radius-lg);
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  text-align: left;
+  transition:
+    border-color var(--tv-transition-fast),
+    background-color var(--tv-transition-fast),
+    transform var(--tv-transition-fast);
+}
+
+.tv-ticker-card:hover {
+  border-color: var(--tv-border-hover);
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-ticker-card.is-selected {
+  border-color: var(--tv-brand);
+  background-color: var(--tv-brand-soft);
+}
+
+/* Dominance & Bond Progress Bars */
+.tv-dominance-bar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: var(--tv-radius-pill);
+  overflow: hidden;
+  gap: 2px;
+  margin-block: 10px 14px;
+}
+
+.tv-dominance-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tv-yield-bar {
+  display: flex;
+  width: 100%;
+  height: 5px;
+  border-radius: var(--tv-radius-pill);
+  background-color: var(--tv-bg-chip);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+/* --------------------------------------------------------------------------
+   5. Community Ideas & Indicators Cards
+   -------------------------------------------------------------------------- */
+.tv-ideas-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.tv-idea-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  border-radius: var(--tv-radius-xl);
+  overflow: hidden;
+  transition:
+    border-color var(--tv-transition-fast),
+    transform var(--tv-transition-fast),
+    box-shadow var(--tv-transition-fast);
+}
+
+.tv-idea-card:hover {
+  border-color: var(--tv-border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--tv-shadow-md);
+}
+
+.tv-idea-card__media {
+  position: relative;
+  height: 172px;
+  background: linear-gradient(180deg, #0d1321 0%, #131722 100%);
+  border-bottom: 1px solid var(--tv-border-subtle);
+  padding: 12px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.tv-idea-card__ribbon {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  width: 24px;
+  height: 28px;
+  background-color: #2962ff;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+}
+
+.tv-idea-card__badges-bottom {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tv-idea-card__badge-tr {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.tv-idea-card__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 8px;
+}
+
+.tv-idea-card__title {
+  font-size: var(--tv-text-md);
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--tv-text-heading);
+  text-align: left;
+  transition: color var(--tv-transition-fast);
+}
+
+.tv-idea-card__title:hover {
+  color: var(--tv-brand);
+}
+
+.tv-idea-card__summary {
+  font-size: var(--tv-text-sm);
+  line-height: 1.45;
+  color: var(--tv-text-secondary);
+}
+
+.tv-idea-card__footer {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tv-boost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--tv-radius-md);
+  border: 1px solid var(--tv-border-strong);
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  color: var(--tv-text-heading);
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast),
+    color var(--tv-transition-fast);
+}
+
+.tv-boost-btn:hover {
+  border-color: var(--tv-brand);
+  color: var(--tv-brand);
+}
+
+.tv-boost-btn.is-boosted {
+  background-color: var(--tv-brand-soft);
+  border-color: var(--tv-brand);
+  color: var(--tv-brand);
+}
+
+/* --------------------------------------------------------------------------
+   6. Asset Category Movers Tables, Economic Calendar & News
+   -------------------------------------------------------------------------- */
+.tv-stock-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.tv-stock-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tv-stock-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: var(--tv-text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tv-text-muted);
+  border-bottom: 1px solid var(--tv-border);
+  white-space: nowrap;
+}
+
+.tv-stock-table th.is-right,
+.tv-stock-table td.is-right {
+  text-align: right;
+}
+
+.tv-stock-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--tv-border-subtle);
+  vertical-align: middle;
+}
+
+.tv-stock-table tbody tr {
+  cursor: pointer;
+  transition: background-color var(--tv-transition-fast);
+}
+
+.tv-stock-table tbody tr:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-rating-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--tv-radius-xs);
+  font-size: var(--tv-text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tv-rating-pill--buy {
+  background-color: var(--tv-up-bg);
+  color: var(--tv-up);
+}
+
+.tv-rating-pill--sell {
+  background-color: var(--tv-down-bg);
+  color: var(--tv-down);
+}
+
+.tv-rating-pill--neutral {
+  background-color: var(--tv-bg-chip);
+  color: var(--tv-text-secondary);
+}
+
+.tv-eco-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: var(--tv-radius-lg);
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  transition: border-color var(--tv-transition-fast);
+}
+
+.tv-eco-card:hover {
+  border-color: var(--tv-border-hover);
+}
+
+.tv-impact-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.tv-impact-bar {
+  width: 3px;
+  border-radius: 1px;
+  background-color: var(--tv-border-strong);
+}
+
+.tv-impact-bar.is-active-low {
+  background-color: var(--tv-warning);
+}
+
+.tv-impact-bar.is-active-high {
+  background-color: var(--tv-down-solid);
+}
+
+.tv-news-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--tv-radius-lg);
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+  text-align: left;
+  transition:
+    border-color var(--tv-transition-fast),
+    background-color var(--tv-transition-fast);
+}
+
+.tv-news-card:hover {
+  border-color: var(--tv-border-hover);
+  background-color: var(--tv-bg-hover);
+}
+
+/* --------------------------------------------------------------------------
+   7. Trading CTA Banner & Footer
+   -------------------------------------------------------------------------- */
+.tv-cta-banner {
+  position: relative;
+  border-radius: 24px;
+  padding: 48px 36px;
+  background:
+    radial-gradient(ellipse 65% 80% at 85% 20%, rgba(41, 98, 255, 0.32) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 70% at 15% 85%, rgba(8, 153, 129, 0.22) 0%, transparent 65%),
+    #0b0e17;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 28px;
+}
+
+.tv-site-footer {
+  margin-top: 64px;
+  border-top: 1px solid var(--tv-border);
+  background-color: var(--tv-bg-secondary);
+  padding: 52px 0 32px;
+}
+
+.tv-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.35fr) repeat(4, minmax(140px, 1fr));
+  gap: 32px;
+}
+
+.tv-footer-col__title {
+  font-size: var(--tv-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tv-text-heading);
+  margin-bottom: 12px;
+}
+
+.tv-footer-col__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tv-footer-col__link {
+  font-size: var(--tv-text-sm);
+  color: var(--tv-text-secondary);
+  text-align: left;
+  transition: color var(--tv-transition-fast);
+}
+
+.tv-footer-col__link:hover {
+  color: var(--tv-brand);
+}
+
+.tv-footer-bottom {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid var(--tv-border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.tv-footer-watermark {
+  margin-top: 28px;
+  text-align: center;
+  font-family: var(--tv-font-display);
+  font-size: clamp(2rem, 6vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--tv-border-strong);
+  opacity: 0.45;
+  user-select: none;
+  line-height: 1;
+}
+
+/* --------------------------------------------------------------------------
+   8. Markets Overview Page (/markets)
+   -------------------------------------------------------------------------- */
+.tv-markets-hero {
+  text-align: center;
+  padding: 44px 0 28px;
+}
+
+.tv-markets-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 18px;
+}
+
+.tv-markets-symbol-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: var(--tv-radius-pill);
+  background-color: transparent;
+  border: 1px solid var(--tv-border-card);
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: left;
+  transition:
+    background-color var(--tv-transition-fast),
+    border-color var(--tv-transition-fast);
+}
+
+.tv-markets-symbol-pill:hover {
+  background-color: var(--tv-bg-hover);
+}
+
+.tv-markets-symbol-pill.is-active {
+  background-color: var(--tv-bg-chip);
+  border-color: var(--tv-brand);
+}
+
+.tv-feature-promo-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px;
+  border-radius: var(--tv-radius-xl);
+  background-color: var(--tv-bg-primary);
+  border: 1px solid var(--tv-border-card);
+}
+
+/* --------------------------------------------------------------------------
+   9. Responsive Overrides
+   -------------------------------------------------------------------------- */
+@media (max-width: 1120px) {
+  .tv-header-nav {
+    display: none;
+  }
+
+  .tv-ideas-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tv-footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tv-header-cta__short {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Live / Real Data Provenance Badges
+   -------------------------------------------------------------------------- */
+.tv-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #089981;
+  box-shadow: 0 0 0 0 rgba(8, 153, 129, 0.55);
+  animation: tv-live-pulse 2s infinite;
+  flex-shrink: 0;
+}
+
+.tv-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--tv-radius-xs);
+  background-color: var(--tv-up-bg);
+  color: var(--tv-up);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tv-real-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--tv-radius-xs);
+  background-color: var(--tv-brand-soft);
+  color: var(--tv-brand-soft-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+@keyframes tv-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(8, 153, 129, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(8, 153, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(8, 153, 129, 0);
+  }
+}
+
+@media (max-width: 760px) {
+  .tv-site-header__inner {
+    padding-inline: 12px;
+    gap: 8px;
+  }
+
+  .tv-site-header__left {
+    gap: 8px;
+  }
+
+  .tv-site-header__right {
+    gap: 4px;
+  }
+
+  .tv-header-search-btn {
+    min-width: 34px;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .tv-header-search-btn span {
+    display: none;
+  }
+
+  .tv-ideas-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tv-footer-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tv-hero {
+    min-height: 540px;
+    padding: 104px 16px 56px;
+  }
+
+  .tv-cta-banner {
+    padding: 28px 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .tv-brand-logo {
+    font-size: 16px;
+    gap: 6px;
+  }
+
+  .tv-brand-logo svg {
+    width: 24px;
+    height: 18px;
+  }
+
+  .tv-header-lang-wrap {
+    display: none;
+  }
+
+  .tv-header-icon-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+  }
+
+  .tv-header-cta {
+    height: 32px;
+    padding: 0 12px;
+    font-size: var(--tv-text-xs);
+  }
+
+  .tv-header-cta__full {
+    display: none;
+  }
+
+  .tv-header-cta__short {
+    display: inline;
+  }
+}
