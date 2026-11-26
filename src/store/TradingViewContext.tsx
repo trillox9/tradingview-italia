@@ -32,14 +32,12 @@ import {
 } from '../types';
 import {
   MarketFeed,
-  fetchRealCandles,
   fetchYahooChart,
-  getCachedRealCandles,
   getCandlesForSymbol,
-  getSnapshotCandles,
   isTestEnvironment,
-  loadRealSnapshot,
   marketFeed as defaultMarketFeed,
+  mergeLatestBarIntoSeries,
+  resolveRealCandlesSmart,
 } from '../data';
 import {
   PINE_TEMPLATES,
@@ -88,6 +86,7 @@ import {
   normalizeSymbolTicker,
   redoDrawingMutation,
   removeSymbolFromWatchlistList,
+  resolveInitialPaneSeriesState,
   resolveSymbolInfo,
   savePersistedActiveWatchlistId,
   savePersistedChartSettings,
@@ -614,22 +613,35 @@ export function TradingViewProvider({
   );
 
   // ---- Active Pane Candle Series & Real Data Provenance ----
-  const [candles, setCandles] = useState<Candle[]>(() =>
-    getCandlesForSymbol(activePane.symbolId, activePane.timeframe, 320),
+  const initialPaneSeries = useMemo(
+    () => resolveInitialPaneSeriesState(activePane.symbolId, activePane.timeframe),
+    // Computed once for initial state hydration; subsequent changes handled by effect below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
   );
+
+  const [candles, setCandles] = useState<Candle[]>(() => initialPaneSeries.candles);
   const [paneDataSources, setPaneDataSources] = useState<
     Record<number, DataSourceKind>
-  >({
-    0: 'simulated',
+  >(() => ({
+    0: initialPaneSeries.dataSource,
     1: 'simulated',
     2: 'simulated',
     3: 'simulated',
-  });
-  const [paneLoading, setPaneLoading] = useState<Record<number, boolean>>({
-    0: false,
+  }));
+  const [paneLoading, setPaneLoading] = useState<Record<number, boolean>>(() => ({
+    0: initialPaneSeries.isLoading,
     1: false,
     2: false,
     3: false,
+  }));
+
+  // Per-pane monotonic fetch sequence counter prevents out-of-order responses from overwriting newer switches
+  const paneFetchSeqRef = useRef<Record<number, number>>({
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 0,
   });
 
   const dataSource: DataSourceKind = paneDataSources[activePaneIndex] ?? 'simulated';
@@ -637,23 +649,27 @@ export function TradingViewProvider({
 
   useEffect(() => {
     const symInfo = resolveSymbolInfo(activePane.symbolId);
-    const cached = !isTestEnvironment()
-      ? getCachedRealCandles(symInfo.ticker, activePane.timeframe)
-      : null;
+    const targetPaneIdx = activePaneIndex;
+    const targetTimeframe = activePane.timeframe;
 
-    const initialSeries =
-      cached && cached.candles.length > 0
-        ? cached.candles
-        : getCandlesForSymbol(symInfo.ticker, activePane.timeframe, 320);
+    const reqSeq = (paneFetchSeqRef.current[targetPaneIdx] ?? 0) + 1;
+    paneFetchSeqRef.current[targetPaneIdx] = reqSeq;
+    const controller = new AbortController();
+    const isCurrent = () =>
+      !controller.signal.aborted &&
+      paneFetchSeqRef.current[targetPaneIdx] === reqSeq;
 
-    setCandles(initialSeries);
-    const initialSource: DataSourceKind = cached ? cached.source : 'simulated';
+    const init = resolveInitialPaneSeriesState(symInfo.ticker, targetTimeframe);
+    setCandles(init.candles);
     setPaneDataSources((prev) => ({
       ...prev,
-      [activePaneIndex]: initialSource,
+      [targetPaneIdx]: init.dataSource,
+    }));
+    setPaneLoading((prev) => ({
+      ...prev,
+      [targetPaneIdx]: init.isLoading,
     }));
 
-    let cancelled = false;
     let unsubCandle: (() => void) | null = null;
     let yahooRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -666,9 +682,10 @@ export function TradingViewProvider({
       if (!tailBar) return;
       unsubCandle = feed.subscribeCandle(
         symInfo.ticker,
-        activePane.timeframe,
+        targetTimeframe,
         tailBar,
         (liveCandle) => {
+          if (!isCurrent()) return;
           setCandles((prev) => {
             if (prev.length === 0) return [liveCandle];
             const tail = prev[prev.length - 1];
@@ -686,74 +703,103 @@ export function TradingViewProvider({
       );
     };
 
-    attachLiveCandleSub(initialSeries);
+    if (init.candles.length > 0) {
+      attachLiveCandleSub(init.candles);
+    }
 
     // Hydrate real historical candles & live quote in browser environments (skipped under Vitest)
     if (!isTestEnvironment() && (symInfo.binanceSymbol || symInfo.yahooSymbol)) {
-      const needsLiveFetch =
-        !cached || cached.source === 'snapshot';
-
-      if (needsLiveFetch) {
-        setPaneLoading((prev) => ({ ...prev, [activePaneIndex]: true }));
-
-        if (symInfo.yahooSymbol && !cached) {
-          void loadRealSnapshot().then(() => {
-            if (cancelled) return;
-            const snapBars = getSnapshotCandles(symInfo.ticker, activePane.timeframe);
-            if (snapBars && snapBars.length > 0) {
-              setCandles((prev) => (prev === initialSeries ? snapBars : prev));
-              setPaneDataSources((prev) =>
-                prev[activePaneIndex] === 'simulated'
-                  ? { ...prev, [activePaneIndex]: 'snapshot' }
-                  : prev,
-              );
+      if (init.isLoading) {
+        // Not in real cache yet: keep candles=[] + loading spinner until real data arrives (zero fake-chart flash!)
+        void resolveRealCandlesSmart(symInfo, targetTimeframe, {
+          signal: controller.signal,
+          liveTimeoutMs: 1200,
+          onLateYahooUpdate: (lateRes) => {
+            if (!isCurrent()) return;
+            if (lateRes.quote) {
+              feed.ingestRealQuote(lateRes.quote);
             }
-          });
-        }
-
-        void fetchRealCandles(symInfo, activePane.timeframe)
+            setCandles((prev) =>
+              mergeLatestBarIntoSeries(prev, lateRes.candles, targetTimeframe),
+            );
+            setPaneDataSources((prev) => ({
+              ...prev,
+              [targetPaneIdx]: 'yahoo',
+            }));
+          },
+        })
           .then((res) => {
-            if (cancelled) return;
+            if (!isCurrent()) return;
             if (res && res.candles.length > 0) {
               setCandles(res.candles);
               setPaneDataSources((prev) => ({
                 ...prev,
-                [activePaneIndex]: res.source,
+                [targetPaneIdx]: res.source,
               }));
               if (res.quote) {
                 feed.ingestRealQuote(res.quote);
               }
               attachLiveCandleSub(res.candles);
+            } else {
+              // Offline fallback ONLY when both live API and real snapshot failed
+              const fallback = getCandlesForSymbol(symInfo.ticker, targetTimeframe, 320);
+              setCandles(fallback);
+              setPaneDataSources((prev) => ({
+                ...prev,
+                [targetPaneIdx]: 'simulated',
+              }));
+              attachLiveCandleSub(fallback);
             }
           })
           .finally(() => {
-            if (!cancelled) {
-              setPaneLoading((prev) => ({ ...prev, [activePaneIndex]: false }));
+            if (paneFetchSeqRef.current[targetPaneIdx] === reqSeq) {
+              setPaneLoading((prev) => ({ ...prev, [targetPaneIdx]: false }));
             }
           });
+      } else if (symInfo.yahooSymbol && init.dataSource === 'snapshot') {
+        // Already displaying real Yahoo snapshot immediately: quietly patch ONLY the latest bar if live Yahoo responds
+        void fetchYahooChart(symInfo, targetTimeframe, false, {
+          signal: controller.signal,
+        }).then((res) => {
+          if (!isCurrent() || !res || res.candles.length === 0) return;
+          if (res.quote) {
+            feed.ingestRealQuote(res.quote);
+          }
+          setCandles((prev) =>
+            mergeLatestBarIntoSeries(prev, res.candles, targetTimeframe),
+          );
+          setPaneDataSources((prev) => ({
+            ...prev,
+            [targetPaneIdx]: 'yahoo',
+          }));
+        });
       }
 
+      // Periodically patch latest live Yahoo bar every 30s without replacing historical series
       if (symInfo.yahooSymbol) {
         yahooRefreshTimer = setInterval(() => {
-          void fetchYahooChart(symInfo, activePane.timeframe, true).then((res) => {
-            if (cancelled || !res) return;
+          if (!isCurrent()) return;
+          void fetchYahooChart(symInfo, targetTimeframe, true, {
+            signal: controller.signal,
+          }).then((res) => {
+            if (!isCurrent() || !res || res.candles.length === 0) return;
             if (res.quote) {
               feed.ingestRealQuote(res.quote);
             }
-            if (res.candles.length > 0) {
-              setCandles(res.candles);
-              setPaneDataSources((prev) => ({
-                ...prev,
-                [activePaneIndex]: 'yahoo',
-              }));
-            }
+            setCandles((prev) =>
+              mergeLatestBarIntoSeries(prev, res.candles, targetTimeframe),
+            );
+            setPaneDataSources((prev) => ({
+              ...prev,
+              [targetPaneIdx]: 'yahoo',
+            }));
           });
         }, 30_000);
       }
     }
 
     return () => {
-      cancelled = true;
+      controller.abort();
       if (unsubCandle) unsubCandle();
       if (yahooRefreshTimer) clearInterval(yahooRefreshTimer);
     };
@@ -1369,14 +1415,16 @@ export function TradingViewProvider({
   // ---- Pine Editor & Strategy Tester ----
   const [pineCode, setPineCode] = useState<string>(PINE_TEMPLATES[0].code);
   const [pineResult, setPineResult] = useState<PineExecutionResult | null>(() =>
-    evaluatePineScript(PINE_TEMPLATES[0].code, candles),
+    candles.length > 0 ? evaluatePineScript(PINE_TEMPLATES[0].code, candles) : null,
   );
   const [pineAppliedToChart, setPineAppliedToChart] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!pineAppliedToChart) return;
-    setPineResult(evaluatePineScript(pineCode, displayedCandles));
-  }, [displayedCandles, pineAppliedToChart, pineCode]);
+    if (displayedCandles.length === 0) return;
+    if (pineAppliedToChart || pineResult === null) {
+      setPineResult(evaluatePineScript(pineCode, displayedCandles));
+    }
+  }, [displayedCandles, pineAppliedToChart, pineCode, pineResult]);
 
   const runPineScript = useCallback(
     (codeOverride?: string): PineExecutionResult => {

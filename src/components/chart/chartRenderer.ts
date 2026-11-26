@@ -409,6 +409,7 @@ export function computeChartLayout(params: {
   width: number;
   height: number;
   precision?: number;
+  fallbackBasePrice?: number;
   candles: Candle[];
   viewport: ViewportState;
   scaleMode: ScaleMode;
@@ -428,6 +429,7 @@ export function computeChartLayout(params: {
     width,
     height,
     precision = 2,
+    fallbackBasePrice = 100,
     candles,
     viewport,
     autoScale,
@@ -485,7 +487,11 @@ export function computeChartLayout(params: {
 
   const startIdx = Math.max(0, Math.floor(leftIndex));
   const endIdx = Math.min(candles.length - 1, Math.ceil(rightIndex));
-  const basePrice = candles[startIdx]?.close ?? candles[0]?.close ?? 1;
+  const safeFallback =
+    Number.isFinite(fallbackBasePrice) && fallbackBasePrice > 0
+      ? fallbackBasePrice
+      : 100;
+  const basePrice = candles[startIdx]?.close ?? candles[0]?.close ?? safeFallback;
 
   // Compute min/max in scaled units across visible bars (+ overlays unless scalePriceChartOnly)
   let sMin = Infinity;
@@ -540,8 +546,8 @@ export function computeChartLayout(params: {
   }
 
   if (!Number.isFinite(sMin) || !Number.isFinite(sMax)) {
-    sMin = 0;
-    sMax = 100;
+    sMin = toScaledValue(safeFallback * 0.98, effectiveScale, basePrice);
+    sMax = toScaledValue(safeFallback * 1.02, effectiveScale, basePrice);
   }
   if (Math.abs(sMax - sMin) < 1e-12) {
     const pad = Math.abs(sMax) > 0 ? Math.abs(sMax) * 0.02 : 1e-6;
@@ -902,6 +908,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     width,
     height,
     precision: effectivePrecision,
+    fallbackBasePrice: symbol.basePrice,
     candles,
     viewport,
     scaleMode,
@@ -2009,7 +2016,8 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     ctx.fillText(unitLabel, layout.priceAxisLeft + layout.priceAxisWidth / 2, 12);
   }
 
-  // Main price axis tick labels
+  // Main price axis tick labels (skip fake placeholder ticks when candles are empty while loading)
+  const hasCandles = candles.length > 0;
   const tickFontPx = effectivePrecision >= 6 ? Math.min(10, scaleFontPx) : scaleFontPx;
   ctx.fillStyle = axisTextColor;
   ctx.font = `${tickFontPx}px ${FONT_FAMILY}`;
@@ -2021,14 +2029,16 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
       : layout.priceAxisLeft + 5;
   const topLabelClearance = scalesCfg.showCurrencyUnit ? 26 : 12;
 
-  for (const tv of mainTicks) {
-    const y = scaledToY(tv, layout);
-    if (y < topLabelClearance || y > layout.mainRect.bottom - 10) continue;
-    ctx.fillText(
-      formatAxisPrice(tv, layout.scaleMode, layout.basePrice, effectivePrecision),
-      tickTextX,
-      y,
-    );
+  if (hasCandles) {
+    for (const tv of mainTicks) {
+      const y = scaledToY(tv, layout);
+      if (y < topLabelClearance || y > layout.mainRect.bottom - 10) continue;
+      ctx.fillText(
+        formatAxisPrice(tv, layout.scaleMode, layout.basePrice, effectivePrecision),
+        tickTextX,
+        y,
+      );
+    }
   }
 
   // Helper to draw a price-axis badge pill cleanly on either Left or Right axis
@@ -2172,6 +2182,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
 
   // ======================== 12. INTERACTIVE CROSSHAIR, AXIS PILLS & `+` BUTTON ========================
   if (
+    hasCandles &&
     crosshair.visible &&
     crosshair.x >= layout.plotLeft &&
     crosshair.x <= layout.plotRight &&

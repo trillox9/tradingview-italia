@@ -19,7 +19,7 @@ L'applicazione si apre direttamente su **Supercharts Pro** (`http://localhost:51
 | --- | --- |
 | `npm run dev` | Avvia il server di sviluppo Vite con proxy locale `/api/yahoo` e HMR |
 | `npm run typecheck` | Verifica rigorosa TypeScript (`tsc --noEmit`) |
-| `npm test` | Esegue la suite di unit test Vitest (`tests/*.test.ts`, **76 test** offline/deterministici) |
+| `npm test` | Esegue la suite di unit test Vitest (`tests/*.test.ts`, **80 test** offline/deterministici) |
 | `npm run fetch:snapshot` | Aggiorna `public/real-market-snapshot.json` con dati reali Yahoo Finance (~180 barre giornaliere per 143 strumenti non-cripto) |
 | `npm run build` | Esegue il controllo tipi e crea il bundle statico GitHub Pages in `dist/` (`base: './'`) |
 | `npm run preview` | Simula localmente il deploy statico GitHub Pages |
@@ -73,7 +73,7 @@ tradingview/
 │   ├── components/        # chart (canvas, 64-tool renderer, flyouts, context menus, floating bars), panels, modals
 │   ├── pages/             # ChartPage (Supercharts Pro), ScreenerPage, HeatmapPage
 │   └── styles/            # tokens.css, global.css, panels.css, chart.css, drawingTools.css, contextMenus.css, modals.css
-└── tests/                 # Suite Vitest (7 file, 76 unit test)
+└── tests/                 # Suite Vitest (7 file, 80 unit test)
 ```
 
 ## Nota sui dati di mercato

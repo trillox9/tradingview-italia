@@ -45,7 +45,55 @@ interface CandleSubscription {
   timeframe: Timeframe;
   currentCandle: Candle;
   listeners: Set<CandleUpdateListener>;
-  klineWs: WebSocket | null;
+}
+
+const BINANCE_INTERVAL_TO_TF: Record<string, Timeframe> = Object.fromEntries(
+  Object.entries(BINANCE_INTERVAL_MAP).map(([tf, interval]) => [
+    interval,
+    tf as Timeframe,
+  ]),
+) as Record<string, Timeframe>;
+
+function getKlineStreamName(ticker: string, timeframe: Timeframe): string | null {
+  const sym = getSymbolByTicker(ticker);
+  if (!sym || !sym.isCrypto || !sym.binanceSymbol) return null;
+  const interval = BINANCE_INTERVAL_MAP[timeframe];
+  return `${sym.binanceSymbol.toLowerCase()}@kline_${interval}`;
+}
+
+/**
+ * Safely closes a WebSocket without triggering Chromium's mid-handshake errors
+ * ("WebSocket is closed before the connection is established").
+ */
+function safeCloseWebSocket(ws: WebSocket): void {
+  try {
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+
+    const connectingState =
+      typeof WebSocket !== 'undefined' ? WebSocket.CONNECTING : 0;
+    const openState = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
+
+    if (ws.readyState === connectingState) {
+      ws.onopen = () => {
+        ws.onopen = null;
+        try {
+          ws.close(1000, 'client_unsubscribe');
+        } catch {
+          // Ignore close errors
+        }
+      };
+      return;
+    }
+
+    ws.onopen = null;
+    if (ws.readyState === openState) {
+      ws.close(1000, 'client_unsubscribe');
+    }
+  } catch {
+    // Ignore close errors
+  }
 }
 
 function roundPrice(value: number, precision: number): number {
@@ -116,6 +164,8 @@ export class MarketFeed {
   private binanceWs: WebSocket | null = null;
   private binanceWsBaseIdx = 0;
   private binanceDisabledByFailure = false;
+  private readonly subscribedKlineStreams = new Set<string>();
+  private wsRpcId = 1;
   private running = false;
   private bootstrapped = false;
 
@@ -153,15 +203,10 @@ export class MarketFeed {
     this.enableLiveCrypto = enabled;
     if (!enabled) {
       this.closeBinanceWs();
-      for (const sub of this.candleSubs.values()) {
-        this.closeKlineWs(sub);
-      }
     } else if (this.running) {
       this.binanceDisabledByFailure = false;
       this.connectBinanceWs();
-      for (const sub of this.candleSubs.values()) {
-        this.connectKlineWs(sub);
-      }
+      this.syncActiveKlineSubscriptions();
     }
   }
 
@@ -188,9 +233,6 @@ export class MarketFeed {
       this.timerId = null;
     }
     this.closeBinanceWs();
-    for (const sub of this.candleSubs.values()) {
-      this.closeKlineWs(sub);
-    }
   }
 
   /** Bootstraps real Yahoo snapshot quotes + real Binance 24hr batch quotes */
@@ -293,22 +335,24 @@ export class MarketFeed {
         timeframe,
         currentCandle: { ...seedCandle },
         listeners: new Set(),
-        klineWs: null,
       };
       this.candleSubs.set(key, sub);
       if (this.enableLiveCrypto && !isTestEnvironment()) {
-        this.connectKlineWs(sub);
+        this.subscribeKlineStream(sub.ticker, sub.timeframe);
       }
     } else {
       sub.currentCandle = { ...seedCandle };
+      if (this.enableLiveCrypto && !isTestEnvironment()) {
+        this.subscribeKlineStream(sub.ticker, sub.timeframe);
+      }
     }
     sub.listeners.add(listener);
 
     return () => {
       sub?.listeners.delete(listener);
       if (sub && sub.listeners.size === 0) {
-        this.closeKlineWs(sub);
         this.candleSubs.delete(key);
+        this.unsubscribeKlineStream(sub.ticker, sub.timeframe);
       }
     };
   }
@@ -469,8 +513,16 @@ export class MarketFeed {
     const nowSec = Math.floor(nowMs / 1000);
     for (const sub of this.candleSubs.values()) {
       if (sub.ticker !== ticker) continue;
-      // When a real Binance kline WS is active for this subscription, let kline frames drive candles directly
-      if (sub.klineWs && sub.klineWs.readyState === WebSocket.OPEN) continue;
+      // When a real Binance multiplexed kline stream is active on the persistent socket, let kline frames drive candles directly
+      const stream = getKlineStreamName(sub.ticker, sub.timeframe);
+      if (
+        stream &&
+        this.subscribedKlineStreams.has(stream) &&
+        this.binanceWs &&
+        this.binanceWs.readyState === WebSocket.OPEN
+      ) {
+        continue;
+      }
 
       const step = TIMEFRAME_SECONDS[sub.timeframe];
       const current = sub.currentCandle;
@@ -532,9 +584,9 @@ export class MarketFeed {
   }
 
   /**
-   * Connects to Binance's all-market `!miniTicker@arr` stream on `data-stream.binance.vision`
-   * (fallback: `stream.binance.com:9443`) to stream live 1s real prices, 24h open, high, low & volume
-   * for all 78 catalog crypto pairs in one lightweight socket.
+   * Connects a single persistent Binance WebSocket (`!miniTicker@arr`) on `data-stream.binance.vision`
+   * (fallback: `stream.binance.com:9443`) and multiplexes active `<sym>@kline_<tf>` streams via
+   * native Binance `SUBSCRIBE`/`UNSUBSCRIBE` JSON frames (avoiding per-switch WS closes & ping races).
    */
   private connectBinanceWs(): void {
     if (this.binanceWs || typeof WebSocket === 'undefined') return;
@@ -545,60 +597,30 @@ export class MarketFeed {
       const ws = new WebSocket(url);
       this.binanceWs = ws;
 
+      ws.onopen = () => {
+        if (this.binanceWs !== ws) return;
+        this.subscribedKlineStreams.clear();
+        this.syncActiveKlineSubscriptions();
+      };
+
       ws.onmessage = (event: MessageEvent) => {
         try {
-          const arr = JSON.parse(String(event.data));
-          if (!Array.isArray(arr)) return;
-          const nowMs = Date.now();
-          const batch: QuoteTick[] = [];
-
-          for (const frame of arr) {
-            if (!frame || typeof frame !== 'object') continue;
-            const s = (frame as { s?: string }).s;
-            if (!s) continue;
-            const state = this.states.get(s);
-            if (!state || !state.symbol.isCrypto) continue;
-
-            const price = Number.parseFloat(String((frame as { c?: string }).c ?? ''));
-            const open = Number.parseFloat(String((frame as { o?: string }).o ?? ''));
-            const high = Number.parseFloat(String((frame as { h?: string }).h ?? ''));
-            const low = Number.parseFloat(String((frame as { l?: string }).l ?? ''));
-            const vol = Number.parseFloat(String((frame as { v?: string }).v ?? '0'));
-            if (!Number.isFinite(price) || price <= 0) continue;
-
-            const sym = state.symbol;
-            const prevClose = Number.isFinite(open) && open > 0 ? roundPrice(open, sym.precision) : state.quote.prevClose;
-            const roundedPrice = roundPrice(price, sym.precision);
-            const change = roundPrice(roundedPrice - prevClose, sym.precision);
-            const changePercent =
-              prevClose > 0
-                ? Math.round(((roundedPrice - prevClose) / prevClose) * 10000) / 100
-                : 0;
-            const spread = Math.max(
-              sym.tickSize,
-              roundPrice(roundedPrice * 0.00012, sym.precision),
-            );
-
-            batch.push({
-              ticker: sym.ticker,
-              id: sym.id,
-              price: roundedPrice,
-              open: prevClose,
-              high: Number.isFinite(high) && high > 0 ? roundPrice(Math.max(high, roundedPrice), sym.precision) : roundedPrice,
-              low: Number.isFinite(low) && low > 0 ? roundPrice(Math.min(low, roundedPrice), sym.precision) : roundedPrice,
-              prevClose,
-              change,
-              changePercent,
-              volume: Number.isFinite(vol) && vol >= 0 ? Math.round(vol) : state.quote.volume,
-              bid: roundPrice(Math.max(sym.tickSize, roundedPrice - spread / 2), sym.precision),
-              ask: roundPrice(roundedPrice + spread / 2, sym.precision),
-              timestamp: nowMs,
-              source: 'binance',
-            });
+          const parsed = JSON.parse(String(event.data));
+          if (Array.isArray(parsed)) {
+            this.handleMiniTickerBatch(parsed);
+            return;
           }
-
-          if (batch.length > 0) {
-            this.ingestRealQuotes(batch);
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            (parsed as { e?: string }).e === 'kline'
+          ) {
+            this.handleMultiplexedKlineFrame(
+              parsed as {
+                s?: string;
+                k?: { t: number; i?: string; o: string; h: string; l: string; c: string; v: string };
+              },
+            );
           }
         } catch {
           // Ignore malformed WS frame silently
@@ -620,6 +642,7 @@ export class MarketFeed {
       ws.onclose = () => {
         if (this.binanceWs === ws) {
           this.binanceWs = null;
+          this.subscribedKlineStreams.clear();
         }
       };
     } catch {
@@ -628,93 +651,180 @@ export class MarketFeed {
     }
   }
 
-  /** Connects a dedicated live `<sym>@kline_<tf>` WebSocket for the active crypto chart */
-  private connectKlineWs(sub: CandleSubscription): void {
-    if (sub.klineWs || typeof WebSocket === 'undefined') return;
-    const sym = getSymbolByTicker(sub.ticker);
-    if (!sym || !sym.isCrypto || !sym.binanceSymbol) return;
+  private handleMiniTickerBatch(arr: unknown[]): void {
+    const nowMs = Date.now();
+    const batch: QuoteTick[] = [];
 
-    const interval = BINANCE_INTERVAL_MAP[sub.timeframe];
-    const base = BINANCE_WS_BASES[this.binanceWsBaseIdx % BINANCE_WS_BASES.length];
-    const url = `${base}/ws/${sym.binanceSymbol}@kline_${interval}`;
+    for (const frame of arr) {
+      if (!frame || typeof frame !== 'object') continue;
+      const s = (frame as { s?: string }).s;
+      if (!s) continue;
+      const state = this.states.get(s);
+      if (!state || !state.symbol.isCrypto) continue;
 
-    try {
-      const ws = new WebSocket(url);
-      sub.klineWs = ws;
+      const price = Number.parseFloat(String((frame as { c?: string }).c ?? ''));
+      const open = Number.parseFloat(String((frame as { o?: string }).o ?? ''));
+      const high = Number.parseFloat(String((frame as { h?: string }).h ?? ''));
+      const low = Number.parseFloat(String((frame as { l?: string }).l ?? ''));
+      const vol = Number.parseFloat(String((frame as { v?: string }).v ?? '0'));
+      if (!Number.isFinite(price) || price <= 0) continue;
 
-      ws.onmessage = (event: MessageEvent) => {
-        try {
-          const payload = JSON.parse(String(event.data)) as {
-            k?: { t: number; o: string; h: string; l: string; c: string; v: string };
-          };
-          const k = payload.k;
-          if (!k) return;
-          const open = Number.parseFloat(k.o);
-          const high = Number.parseFloat(k.h);
-          const low = Number.parseFloat(k.l);
-          const close = Number.parseFloat(k.c);
-          const volume = Number.parseFloat(k.v);
-          if (!Number.isFinite(close) || close <= 0) return;
+      const sym = state.symbol;
+      const prevClose =
+        Number.isFinite(open) && open > 0
+          ? roundPrice(open, sym.precision)
+          : state.quote.prevClose;
+      const roundedPrice = roundPrice(price, sym.precision);
+      const change = roundPrice(roundedPrice - prevClose, sym.precision);
+      const changePercent =
+        prevClose > 0
+          ? Math.round(((roundedPrice - prevClose) / prevClose) * 10000) / 100
+          : 0;
+      const spread = Math.max(
+        sym.tickSize,
+        roundPrice(roundedPrice * 0.00012, sym.precision),
+      );
 
-          const liveCandle: Candle = {
-            time: Math.floor(k.t / 1000),
-            open,
-            high: Math.max(high, open, close),
-            low: Math.min(low, open, close),
-            close,
-            volume: Number.isFinite(volume) && volume >= 0 ? volume : 0,
-          };
+      batch.push({
+        ticker: sym.ticker,
+        id: sym.id,
+        price: roundedPrice,
+        open: prevClose,
+        high:
+          Number.isFinite(high) && high > 0
+            ? roundPrice(Math.max(high, roundedPrice), sym.precision)
+            : roundedPrice,
+        low:
+          Number.isFinite(low) && low > 0
+            ? roundPrice(Math.min(low, roundedPrice), sym.precision)
+            : roundedPrice,
+        prevClose,
+        change,
+        changePercent,
+        volume:
+          Number.isFinite(vol) && vol >= 0
+            ? Math.round(vol)
+            : state.quote.volume,
+        bid: roundPrice(
+          Math.max(sym.tickSize, roundedPrice - spread / 2),
+          sym.precision,
+        ),
+        ask: roundPrice(roundedPrice + spread / 2, sym.precision),
+        timestamp: nowMs,
+        source: 'binance',
+      });
+    }
 
-          sub.currentCandle = liveCandle;
-          for (const listener of sub.listeners) {
-            listener({ ...liveCandle });
-          }
-        } catch {
-          // Ignore malformed frame
-        }
-      };
-
-      ws.onerror = () => {
-        this.closeKlineWs(sub);
-      };
-
-      ws.onclose = () => {
-        if (sub.klineWs === ws) {
-          sub.klineWs = null;
-        }
-      };
-    } catch {
-      sub.klineWs = null;
+    if (batch.length > 0) {
+      this.ingestRealQuotes(batch);
     }
   }
 
-  private closeKlineWs(sub: CandleSubscription): void {
-    if (sub.klineWs) {
-      try {
-        sub.klineWs.onopen = null;
-        sub.klineWs.onmessage = null;
-        sub.klineWs.onerror = null;
-        sub.klineWs.onclose = null;
-        sub.klineWs.close();
-      } catch {
-        // Ignore
-      }
-      sub.klineWs = null;
+  private handleMultiplexedKlineFrame(payload: {
+    s?: string;
+    k?: {
+      t: number;
+      i?: string;
+      o: string;
+      h: string;
+      l: string;
+      c: string;
+      v: string;
+    };
+  }): void {
+    const k = payload.k;
+    if (!k) return;
+    const ticker = typeof payload.s === 'string' ? payload.s.toUpperCase() : '';
+    const tf = k.i ? BINANCE_INTERVAL_TO_TF[k.i] : undefined;
+    if (!ticker || !tf) return;
+
+    const sub = this.candleSubs.get(`${ticker}|${tf}`);
+    if (!sub || sub.listeners.size === 0) return;
+
+    const open = Number.parseFloat(k.o);
+    const high = Number.parseFloat(k.h);
+    const low = Number.parseFloat(k.l);
+    const close = Number.parseFloat(k.c);
+    const volume = Number.parseFloat(k.v);
+    if (!Number.isFinite(close) || close <= 0) return;
+
+    const liveCandle: Candle = {
+      time: Math.floor(k.t / 1000),
+      open,
+      high: Math.max(high, open, close),
+      low: Math.min(low, open, close),
+      close,
+      volume: Number.isFinite(volume) && volume >= 0 ? volume : 0,
+    };
+
+    sub.currentCandle = liveCandle;
+    for (const listener of sub.listeners) {
+      listener({ ...liveCandle });
     }
+  }
+
+  private sendWsControl(method: 'SUBSCRIBE' | 'UNSUBSCRIBE', params: string[]): void {
+    if (params.length === 0 || !this.binanceWs) return;
+    const openState = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
+    if (this.binanceWs.readyState !== openState) return;
+    try {
+      this.binanceWs.send(
+        JSON.stringify({
+          method,
+          params,
+          id: this.wsRpcId++,
+        }),
+      );
+    } catch {
+      // Ignore transient send errors
+    }
+  }
+
+  private syncActiveKlineSubscriptions(): void {
+    if (!this.enableLiveCrypto || isTestEnvironment()) return;
+    const toSubscribe: string[] = [];
+    for (const sub of this.candleSubs.values()) {
+      if (sub.listeners.size === 0) continue;
+      const stream = getKlineStreamName(sub.ticker, sub.timeframe);
+      if (stream && !this.subscribedKlineStreams.has(stream)) {
+        this.subscribedKlineStreams.add(stream);
+        toSubscribe.push(stream);
+      }
+    }
+    if (toSubscribe.length > 0) {
+      this.sendWsControl('SUBSCRIBE', toSubscribe);
+    }
+  }
+
+  private subscribeKlineStream(ticker: string, timeframe: Timeframe): void {
+    const stream = getKlineStreamName(ticker, timeframe);
+    if (!stream || !this.enableLiveCrypto || isTestEnvironment()) return;
+    if (!this.binanceWs && !this.binanceDisabledByFailure) {
+      this.connectBinanceWs();
+    }
+    if (!this.subscribedKlineStreams.has(stream)) {
+      const openState = typeof WebSocket !== 'undefined' ? WebSocket.OPEN : 1;
+      if (this.binanceWs && this.binanceWs.readyState === openState) {
+        this.subscribedKlineStreams.add(stream);
+        this.sendWsControl('SUBSCRIBE', [stream]);
+      }
+      // If binanceWs is still CONNECTING, ws.onopen calls syncActiveKlineSubscriptions() automatically
+    }
+  }
+
+  private unsubscribeKlineStream(ticker: string, timeframe: Timeframe): void {
+    const stream = getKlineStreamName(ticker, timeframe);
+    if (!stream || !this.subscribedKlineStreams.has(stream)) return;
+    this.subscribedKlineStreams.delete(stream);
+    this.sendWsControl('UNSUBSCRIBE', [stream]);
   }
 
   private closeBinanceWs(): void {
+    this.subscribedKlineStreams.clear();
     if (this.binanceWs) {
-      try {
-        this.binanceWs.onopen = null;
-        this.binanceWs.onmessage = null;
-        this.binanceWs.onerror = null;
-        this.binanceWs.onclose = null;
-        this.binanceWs.close();
-      } catch {
-        // Ignore close errors
-      }
+      const ws = this.binanceWs;
       this.binanceWs = null;
+      safeCloseWebSocket(ws);
     }
   }
 }

@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import {
   DRAWING_TOOL_GROUPS,
@@ -917,7 +916,6 @@ export function DrawingToolbar({
   } = useDrawings();
 
   const [groupToolMap, setGroupToolMap] = useState(getInitialGroupToolMap);
-  const [lastMagnetMode, setLastMagnetMode] = useState<'weak' | 'strong'>('weak');
   const [flyout, setFlyout] = useState<FlyoutKind | null>(null);
   const [flyoutCoords, setFlyoutCoords] = useState<{ top: number; left: number; maxHeight: number }>({
     top: 48,
@@ -928,8 +926,7 @@ export function DrawingToolbar({
   const anchorRectRef = useRef<DOMRect | null>(null);
   const railRef = useRef<HTMLElement | null>(null);
   const flyoutRef = useRef<HTMLDivElement | null>(null);
-  const longPressTimerRef = useRef<number | null>(null);
-  const hoverSwitchedGroupRef = useRef<DrawingToolGroup | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
 
   const canonicalActiveTool = useMemo(
     () => normalizeDrawingTool(activeTool),
@@ -953,35 +950,26 @@ export function DrawingToolbar({
     });
   }, [canonicalActiveTool]);
 
-  useEffect(() => {
-    if (magnetMode === 'weak' || magnetMode === 'strong') {
-      setLastMagnetMode(magnetMode);
-    }
-  }, [magnetMode]);
-
   const computeInitialCoords = useCallback((anchorEl: HTMLElement) => {
     const rect = anchorEl.getBoundingClientRect();
     anchorRectRef.current = rect;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const left = Math.min(vw - 260, rect.right + 6);
-    const top = Math.max(8, Math.min(vh - 220, rect.top));
+    const isMobile = vw <= 900;
+    const left = isMobile ? 58 : Math.min(vw - 260, rect.right + 6);
+    const minTop = isMobile ? 46 : 8;
+    const maxHeight = isMobile ? Math.max(160, vh - 64) : Math.max(180, vh - 16);
+    const top = Math.max(minTop, Math.min(vh - 220, rect.top));
     return {
       top,
       left: Math.max(8, left),
-      maxHeight: Math.max(180, vh - 16),
+      maxHeight,
     };
   }, []);
 
   const openFlyout = useCallback(
     (next: FlyoutKind, anchorEl: HTMLElement | null) => {
       if (!anchorEl) return;
-      if (next.type === 'group' && hoverSwitchedGroupRef.current === next.group) {
-        hoverSwitchedGroupRef.current = null;
-        setFlyoutCoords(computeInitialCoords(anchorEl));
-        return;
-      }
-      hoverSwitchedGroupRef.current = null;
       setFlyout((prev) => {
         const same =
           prev &&
@@ -996,6 +984,20 @@ export function DrawingToolbar({
     [computeInitialCoords],
   );
 
+  const closeMobileIfNeeded = useCallback(() => {
+    if (
+      mobileOpen ||
+      (typeof window !== 'undefined' && window.innerWidth <= 900)
+    ) {
+      onCloseMobile?.();
+    }
+  }, [mobileOpen, onCloseMobile]);
+
+  const dismissAll = useCallback(() => {
+    setFlyout(null);
+    closeMobileIfNeeded();
+  }, [closeMobileIfNeeded]);
+
   // Clamp flyout cleanly inside viewport after measuring actual rendered dimensions
   useLayoutEffect(() => {
     if (!flyout || !flyoutRef.current || !anchorRectRef.current) return;
@@ -1003,23 +1005,31 @@ export function DrawingToolbar({
       if (!flyoutRef.current || !anchorRectRef.current) return;
       const vw = window.innerWidth;
       const vh = window.innerHeight;
+      const isMobile = vw <= 900;
       const anchor = anchorRectRef.current;
       const rect = flyoutRef.current.getBoundingClientRect();
 
-      let left = anchor.right + 6;
+      let left = isMobile ? 58 : anchor.right + 6;
       if (left + rect.width > vw - 8) {
-        left = Math.max(8, vw - rect.width - 8);
+        left = Math.max(isMobile ? 58 : 8, vw - rect.width - 8);
+      }
+      left = Math.max(8, left);
+
+      const minTop = isMobile ? 46 : 8;
+      const bottomPad = isMobile ? 14 : 8;
+      let top = Math.max(minTop, anchor.top);
+      if (top + rect.height > vh - bottomPad) {
+        top = Math.max(minTop, vh - rect.height - bottomPad);
       }
 
-      let top = anchor.top;
-      if (top + rect.height > vh - 8) {
-        top = Math.max(8, vh - rect.height - 8);
-      }
+      const maxHeight = isMobile ? Math.max(160, vh - 64) : Math.max(160, vh - 16);
 
       setFlyoutCoords((prev) =>
-        Math.abs(prev.top - top) < 1 && Math.abs(prev.left - left) < 1
+        Math.abs(prev.top - top) < 1 &&
+        Math.abs(prev.left - left) < 1 &&
+        Math.abs(prev.maxHeight - maxHeight) < 1
           ? prev
-          : { top, left, maxHeight: Math.max(160, vh - 16) },
+          : { top, left, maxHeight },
       );
     };
 
@@ -1028,16 +1038,22 @@ export function DrawingToolbar({
     return () => window.removeEventListener('resize', clamp);
   }, [flyout]);
 
-  // Close flyout on outside pointerdown or Escape
+  // Close flyout on outside pointerdown or Escape (ignoring pencil toggle & mobile backdrop)
   useEffect(() => {
-    if (!flyout) {
-      hoverSwitchedGroupRef.current = null;
-      return;
-    }
+    if (!flyout) return;
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as Node | null;
       if (!t) return;
-      if (flyoutRef.current?.contains(t) || railRef.current?.contains(t)) return;
+      if (
+        flyoutRef.current?.contains(t) ||
+        railRef.current?.contains(t) ||
+        backdropRef.current?.contains(t)
+      ) {
+        return;
+      }
+      if (t instanceof Element && t.closest('[data-drawing-toggle="true"]')) {
+        return;
+      }
       setFlyout(null);
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1053,29 +1069,8 @@ export function DrawingToolbar({
     };
   }, [flyout]);
 
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimerRef.current !== null) {
-      window.clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  }, []);
-
-  const handleGroupPointerDown = (
-    e: ReactPointerEvent<HTMLButtonElement>,
-    group: Exclude<DrawingToolGroup, 'utilities'>,
-  ) => {
-    if (e.pointerType === 'mouse') return;
-    cancelLongPress();
-    const target = e.currentTarget.parentElement ?? e.currentTarget;
-    longPressTimerRef.current = window.setTimeout(() => {
-      longPressTimerRef.current = null;
-      setFlyoutCoords(computeInitialCoords(target));
-      setFlyout({ type: 'group', group });
-    }, 420);
-  };
-
   const selectTool = useCallback(
-    (tool: CanonicalDrawingToolType, closeMobileRail = false) => {
+    (tool: CanonicalDrawingToolType, closeMobileRail = true) => {
       const meta = DRAWING_TOOL_REGISTRY[tool];
       if (meta && meta.group !== 'utilities') {
         const grp = meta.group as Exclude<DrawingToolGroup, 'utilities'>;
@@ -1090,18 +1085,12 @@ export function DrawingToolbar({
         });
       }
       setActiveTool(tool);
-      hoverSwitchedGroupRef.current = null;
       setFlyout(null);
-      if (
-        closeMobileRail &&
-        mobileOpen &&
-        typeof window !== 'undefined' &&
-        window.innerWidth <= 900
-      ) {
-        onCloseMobile?.();
+      if (closeMobileRail) {
+        closeMobileIfNeeded();
       }
     },
-    [mobileOpen, onCloseMobile, setActiveTool],
+    [closeMobileIfNeeded, setActiveTool],
   );
 
   const hasIndicators = activePane.indicators.length > 0 || pineAppliedToChart;
@@ -1124,6 +1113,30 @@ export function DrawingToolbar({
 
   return (
     <>
+      {mobileOpen && (
+        <div
+          ref={backdropRef}
+          className="sc-dt-mobile-backdrop"
+          aria-hidden="true"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+          }}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dismissAll();
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dismissAll();
+          }}
+        />
+      )}
+
       <aside
         ref={railRef}
         className={railClassName}
@@ -1131,7 +1144,7 @@ export function DrawingToolbar({
         aria-orientation="vertical"
         aria-label="Strumenti di disegno"
       >
-        {/* ---- 7 Primary TradingView Tool Groups ---- */}
+        {/* ---- 7 Primary TradingView Tool Groups (single-click opens flyout) ---- */}
         {PRIMARY_DRAWING_GROUPS.map((grp) => {
           if (grp === 'utilities') return null;
           const groupDef = DRAWING_TOOL_GROUPS.find((g) => g.id === grp);
@@ -1142,40 +1155,20 @@ export function DrawingToolbar({
           const groupLabel = getDisplayGroupTitle(grp, groupDef?.labelIt ?? grp);
           const toolLabel = getDisplayToolLabel(currentTool);
           const tooltip = meta.shortcut
-            ? `${toolLabel} (${meta.shortcut})`
-            : toolLabel;
+            ? `${groupLabel} · ${toolLabel} (${meta.shortcut})`
+            : `${groupLabel} · ${toolLabel}`;
 
           return (
             <div
               key={grp}
               className={`sc-dt-slot ${isActive ? 'sc-dt-slot--active' : ''}`}
-              onMouseEnter={(e) => {
-                if (flyout?.type === 'group' && flyout.group !== grp) {
-                  hoverSwitchedGroupRef.current = grp;
-                  setFlyoutCoords(computeInitialCoords(e.currentTarget));
-                  setFlyout({ type: 'group', group: grp });
-                }
-              }}
             >
               <button
                 type="button"
-                className={`sc-dt-btn ${isActive ? 'sc-dt-btn--active' : ''}`}
+                className={`sc-dt-btn sc-dt-btn--group ${isActive ? 'sc-dt-btn--active' : ''}`}
                 title={tooltip}
-                aria-label={toolLabel}
+                aria-label={`${groupLabel}: ${toolLabel}`}
                 aria-pressed={isActive}
-                onPointerDown={(e) => handleGroupPointerDown(e, grp)}
-                onPointerUp={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                onPointerLeave={cancelLongPress}
-                onClick={() => selectTool(currentTool, grp !== 'cursors')}
-              >
-                <DrawingToolIcon tool={currentTool} size={18} />
-              </button>
-              <button
-                type="button"
-                className={`sc-dt-caret ${flyOpen ? 'sc-dt-caret--open' : ''}`}
-                title={groupLabel}
-                aria-label={`Apri menu ${groupLabel}`}
                 aria-expanded={flyOpen}
                 aria-haspopup="menu"
                 onClick={(e) => {
@@ -1183,7 +1176,13 @@ export function DrawingToolbar({
                   openFlyout({ type: 'group', group: grp }, e.currentTarget.parentElement);
                 }}
               >
-                <CaretIcon />
+                <DrawingToolIcon tool={currentTool} size={18} />
+                <span
+                  className={`sc-dt-caret-indicator ${flyOpen ? 'sc-dt-caret-indicator--open' : ''}`}
+                  aria-hidden="true"
+                >
+                  <CaretIcon />
+                </span>
               </button>
             </div>
           );
@@ -1231,6 +1230,7 @@ export function DrawingToolbar({
               onClick={() => {
                 setFlyout(null);
                 onZoomOut?.();
+                closeMobileIfNeeded();
               }}
             >
               <ZoomOutIcon />
@@ -1240,11 +1240,11 @@ export function DrawingToolbar({
 
         <div className="sc-dt-sep" />
 
-        {/* Calamita (Off / Weak / Strong) */}
+        {/* Calamita (single click toggles flyout) */}
         <div className={`sc-dt-slot ${magnetMode !== 'off' ? 'sc-dt-slot--active' : ''}`}>
           <button
             type="button"
-            className={`sc-dt-btn ${magnetMode !== 'off' ? 'sc-dt-btn--active' : ''}`}
+            className={`sc-dt-btn sc-dt-btn--group ${magnetMode !== 'off' ? 'sc-dt-btn--active' : ''}`}
             title={
               magnetMode === 'off'
                 ? 'Calamita: Disattiva (Ctrl)'
@@ -1254,9 +1254,12 @@ export function DrawingToolbar({
             }
             aria-label="Modalità calamita"
             aria-pressed={magnetMode !== 'off'}
-            onClick={() =>
-              setMagnetMode(magnetMode === 'off' ? lastMagnetMode : 'off')
-            }
+            aria-expanded={flyout?.type === 'magnet'}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              e.stopPropagation();
+              openFlyout({ type: 'magnet' }, e.currentTarget.parentElement);
+            }}
           >
             <MagnetIcon />
             {magnetMode !== 'off' && (
@@ -1268,20 +1271,12 @@ export function DrawingToolbar({
                 {magnetMode === 'weak' ? 'D' : 'F'}
               </span>
             )}
-          </button>
-          <button
-            type="button"
-            className={`sc-dt-caret ${flyout?.type === 'magnet' ? 'sc-dt-caret--open' : ''}`}
-            title="Opzioni calamita"
-            aria-label="Apri menu Calamita"
-            aria-expanded={flyout?.type === 'magnet'}
-            aria-haspopup="menu"
-            onClick={(e) => {
-              e.stopPropagation();
-              openFlyout({ type: 'magnet' }, e.currentTarget.parentElement);
-            }}
-          >
-            <CaretIcon />
+            <span
+              className={`sc-dt-caret-indicator ${flyout?.type === 'magnet' ? 'sc-dt-caret-indicator--open' : ''}`}
+              aria-hidden="true"
+            >
+              <CaretIcon />
+            </span>
           </button>
         </div>
 
@@ -1293,7 +1288,10 @@ export function DrawingToolbar({
             title="Rimani in modalità disegno"
             aria-label="Rimani in modalità disegno"
             aria-pressed={stayInDrawingMode}
-            onClick={() => setStayInDrawingMode(!stayInDrawingMode)}
+            onClick={() => {
+              setFlyout(null);
+              setStayInDrawingMode(!stayInDrawingMode);
+            }}
           >
             <StayDrawingIcon />
           </button>
@@ -1311,17 +1309,20 @@ export function DrawingToolbar({
             }
             aria-label="Blocca tutti gli strumenti di disegno"
             aria-pressed={lockDrawings}
-            onClick={() => setLockDrawings(!lockDrawings)}
+            onClick={() => {
+              setFlyout(null);
+              setLockDrawings(!lockDrawings);
+            }}
           >
             <LockIcon locked={lockDrawings} />
           </button>
         </div>
 
-        {/* Nascondi flyout */}
+        {/* Nascondi (single click toggles flyout) */}
         <div className={`sc-dt-slot ${hideMode !== 'none' ? 'sc-dt-slot--active' : ''}`}>
           <button
             type="button"
-            className={`sc-dt-btn ${hideMode !== 'none' ? 'sc-dt-btn--active' : ''}`}
+            className={`sc-dt-btn sc-dt-btn--group ${hideMode !== 'none' ? 'sc-dt-btn--active' : ''}`}
             title={
               hideMode === 'none'
                 ? 'Nascondi disegni (Ctrl+Alt+H)'
@@ -1329,15 +1330,6 @@ export function DrawingToolbar({
             }
             aria-label="Opzioni Nascondi"
             aria-pressed={hideMode !== 'none'}
-            onClick={() => setHideMode(hideMode === 'none' ? 'drawings' : 'none')}
-          >
-            <EyeIcon hidden={hideMode !== 'none'} />
-          </button>
-          <button
-            type="button"
-            className={`sc-dt-caret ${flyout?.type === 'hide' ? 'sc-dt-caret--open' : ''}`}
-            title="Opzioni Nascondi"
-            aria-label="Apri menu Nascondi"
             aria-expanded={flyout?.type === 'hide'}
             aria-haspopup="menu"
             onClick={(e) => {
@@ -1345,46 +1337,42 @@ export function DrawingToolbar({
               openFlyout({ type: 'hide' }, e.currentTarget.parentElement);
             }}
           >
-            <CaretIcon />
+            <EyeIcon hidden={hideMode !== 'none'} />
+            <span
+              className={`sc-dt-caret-indicator ${flyout?.type === 'hide' ? 'sc-dt-caret-indicator--open' : ''}`}
+              aria-hidden="true"
+            >
+              <CaretIcon />
+            </span>
           </button>
         </div>
 
-        {/* Rimuovi flyout */}
+        {/* Rimuovi (single click toggles flyout) */}
         <div className="sc-dt-slot">
           <button
             type="button"
-            className="sc-dt-btn sc-dt-btn--danger"
+            className="sc-dt-btn sc-dt-btn--group sc-dt-btn--danger"
             title={
               drawings.length > 0
-                ? `Rimuovi disegni (${drawings.length})`
+                ? `Rimuovi oggetti (${drawings.length} disegni)`
                 : 'Rimuovi oggetti'
             }
             aria-label="Rimuovi disegni e indicatori"
-            disabled={!hasAnyObjects}
-            onClick={(e) => {
-              if (drawings.length > 0 && !hasIndicators) {
-                clearDrawings();
-                setFlyout(null);
-              } else {
-                openFlyout({ type: 'remove' }, e.currentTarget.parentElement);
-              }
-            }}
-          >
-            <TrashIcon />
-          </button>
-          <button
-            type="button"
-            className={`sc-dt-caret ${flyout?.type === 'remove' ? 'sc-dt-caret--open' : ''}`}
-            title="Opzioni Rimuovi"
-            aria-label="Apri menu Rimuovi"
             aria-expanded={flyout?.type === 'remove'}
             aria-haspopup="menu"
+            disabled={!hasAnyObjects}
             onClick={(e) => {
               e.stopPropagation();
               openFlyout({ type: 'remove' }, e.currentTarget.parentElement);
             }}
           >
-            <CaretIcon />
+            <TrashIcon />
+            <span
+              className={`sc-dt-caret-indicator ${flyout?.type === 'remove' ? 'sc-dt-caret-indicator--open' : ''}`}
+              aria-hidden="true"
+            >
+              <CaretIcon />
+            </span>
           </button>
         </div>
 
@@ -1405,7 +1393,10 @@ export function DrawingToolbar({
             }
             aria-label="Mostra barra strumenti di disegno preferiti"
             aria-pressed={showFavoritesBar}
-            onClick={() => toggleFavoritesBar()}
+            onClick={() => {
+              setFlyout(null);
+              toggleFavoritesBar();
+            }}
           >
             <StarIcon filled={showFavoritesBar} size={17} />
           </button>
@@ -1463,9 +1454,7 @@ export function DrawingToolbar({
                           type="button"
                           role="menuitem"
                           className="sc-dt-flyout-main"
-                          onClick={() =>
-                            selectTool(toolId, flyout.group !== 'cursors')
-                          }
+                          onClick={() => selectTool(toolId, true)}
                         >
                           <span className="sc-dt-flyout-left">
                             <DrawingToolIcon tool={toolId} size={17} />
@@ -1531,7 +1520,7 @@ export function DrawingToolbar({
                       className="sc-dt-flyout-main"
                       onClick={() => {
                         setMagnetMode(opt.mode);
-                        setFlyout(null);
+                        dismissAll();
                       }}
                     >
                       <span className="sc-dt-flyout-left">
@@ -1569,7 +1558,7 @@ export function DrawingToolbar({
                       className="sc-dt-flyout-main"
                       onClick={() => {
                         setHideMode(opt.mode);
-                        setFlyout(null);
+                        dismissAll();
                       }}
                     >
                       <span className="sc-dt-flyout-left">
@@ -1597,7 +1586,7 @@ export function DrawingToolbar({
                   disabled={drawings.length === 0}
                   onClick={() => {
                     clearDrawings();
-                    setFlyout(null);
+                    dismissAll();
                   }}
                 >
                   <span className="sc-dt-flyout-left">
@@ -1616,7 +1605,7 @@ export function DrawingToolbar({
                   disabled={!hasIndicators}
                   onClick={() => {
                     clearIndicators();
-                    setFlyout(null);
+                    dismissAll();
                   }}
                 >
                   <span className="sc-dt-flyout-left">
@@ -1636,7 +1625,7 @@ export function DrawingToolbar({
                   disabled={!hasAnyObjects}
                   onClick={() => {
                     clearAllObjects();
-                    setFlyout(null);
+                    dismissAll();
                   }}
                 >
                   <span className="sc-dt-flyout-left">

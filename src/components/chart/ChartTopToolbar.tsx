@@ -470,6 +470,7 @@ export function ChartTopToolbar({
         {/* Mobile/Tablet Drawing Bar Quick Toggle */}
         <button
           type="button"
+          data-drawing-toggle="true"
           className={`sc-tb-btn sc-tb-btn--icon sc-mobile-only ${showDrawingBar ? 'sc-tb-btn--active' : ''}`}
           title={showDrawingBar ? 'Nascondi strumenti di disegno' : 'Mostra strumenti di disegno'}
           aria-label="Strumenti di disegno"
@@ -710,7 +711,39 @@ export function ChartTopToolbar({
 
           <div className="sc-menu-sep" />
 
-          {/* Mobile quick actions hidden at <= 640px */}
+          {/* Mobile/tablet quick actions hidden from top bar at <= 900px */}
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            title="Annulla disegno (Ctrl+Z)"
+            aria-label="Annulla disegno"
+            disabled={!canUndo}
+            style={!canUndo ? { opacity: 0.42, cursor: 'not-allowed' } : undefined}
+            onClick={() => {
+              undo();
+              setOpenMenu(null);
+            }}
+          >
+            <span className="sc-menu-item-left"><Undo2 size={15} /> Annulla disegno</span>
+            <span className="sc-menu-kbd">Ctrl + Z</span>
+          </button>
+
+          <button
+            type="button"
+            className="sc-menu-item sc-mobile-menu-only"
+            title="Ripeti disegno (Ctrl+Y)"
+            aria-label="Ripeti disegno"
+            disabled={!canRedo}
+            style={!canRedo ? { opacity: 0.42, cursor: 'not-allowed' } : undefined}
+            onClick={() => {
+              redo();
+              setOpenMenu(null);
+            }}
+          >
+            <span className="sc-menu-item-left"><Redo2 size={15} /> Ripeti disegno</span>
+            <span className="sc-menu-kbd">Ctrl + Y</span>
+          </button>
+
           <button
             type="button"
             className="sc-menu-item sc-mobile-menu-only"

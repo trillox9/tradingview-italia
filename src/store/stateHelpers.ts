@@ -7,19 +7,24 @@ import {
   type CanonicalDrawingToolType,
   type ChartSettings,
   type ChartSettingsPatch,
+  type DataSourceKind,
   type DrawingObject,
   type DrawingToolType,
   type IndicatorConfig,
   type IndicatorSeries,
   type PineExecutionResult,
   type SymbolInfo,
+  type Timeframe,
   type WatchlistGroup,
 } from '../types';
 import {
   DEFAULT_WATCHLISTS,
   SYMBOLS,
+  getCachedRealCandles,
+  getCandlesForSymbol,
   getSymbolById,
   getSymbolByTicker,
+  isTestEnvironment,
 } from '../data';
 import {
   DEFAULT_INDICATOR_PRESETS,
@@ -94,6 +99,60 @@ export function normalizeSymbolTicker(symbolOrId?: string): string {
 export function resolveSymbolInfo(symbolOrId?: string): SymbolInfo {
   const ticker = normalizeSymbolTicker(symbolOrId);
   return getSymbolByTicker(ticker) ?? SYMBOLS[0];
+}
+
+export interface InitialPaneSeriesState {
+  candles: Candle[];
+  dataSource: DataSourceKind;
+  isLoading: boolean;
+}
+
+/**
+ * Resolves the synchronous initial candle series for a pane without ever flashing
+ * synthetic simulated candles for live market instruments in browser mode:
+ * - Under Vitest (`testEnv = true`): synchronous deterministic simulated candles (`isLoading: false`).
+ * - In Browser (`testEnv = false`):
+ *   - Returns cached real Binance/Yahoo/snapshot candles immediately (`isLoading: false`).
+ *   - Otherwise returns `candles: []` with `isLoading: true` so the canvas displays a clean
+ *     loading spinner until real data resolves (zero fake-chart flash!).
+ */
+export function resolveInitialPaneSeriesState(
+  symbolId: string,
+  timeframe: Timeframe,
+  testEnv = isTestEnvironment(),
+): InitialPaneSeriesState {
+  const symInfo = resolveSymbolInfo(symbolId);
+
+  if (testEnv) {
+    return {
+      candles: getCandlesForSymbol(symInfo.ticker, timeframe, 320),
+      dataSource: 'simulated',
+      isLoading: false,
+    };
+  }
+
+  const cached = getCachedRealCandles(symInfo.ticker, timeframe);
+  if (cached && cached.candles.length > 0) {
+    return {
+      candles: cached.candles,
+      dataSource: cached.source,
+      isLoading: false,
+    };
+  }
+
+  if (symInfo.binanceSymbol || symInfo.yahooSymbol) {
+    return {
+      candles: [],
+      dataSource: 'simulated',
+      isLoading: true,
+    };
+  }
+
+  return {
+    candles: getCandlesForSymbol(symInfo.ticker, timeframe, 320),
+    dataSource: 'simulated',
+    isLoading: false,
+  };
 }
 
 function cloneIndicatorPreset(type: IndicatorConfig['type'], suffix: string): IndicatorConfig {

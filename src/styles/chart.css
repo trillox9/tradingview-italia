@@ -727,6 +727,60 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
   flex-shrink: 0;
 }
 
+/* Centered real-data loading overlay (shown while Binance/Yahoo candles hydrate) */
+.sc-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.28);
+}
+:root:not([data-theme='dark']) .sc-loading-overlay {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.sc-loading-card {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 24px;
+  border-radius: 10px;
+  background: rgba(19, 19, 19, 0.92);
+  border: 1px solid var(--sc-border);
+  box-shadow: var(--sc-shadow);
+  backdrop-filter: blur(6px);
+}
+:root:not([data-theme='dark']) .sc-loading-card {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.sc-loading-ring {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(41, 98, 255, 0.24);
+  border-top-color: var(--sc-brand);
+  animation: sc-spin 0.75s linear infinite;
+}
+
+.sc-loading-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sc-text-strong);
+  letter-spacing: 0.01em;
+}
+
+.sc-loading-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sc-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 @keyframes sc-live-pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(34, 171, 148, 0.65);

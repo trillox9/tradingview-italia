@@ -208,6 +208,7 @@ export function ChartCanvas({
     indicatorSeries: activeIndicatorSeries,
     paneDataSources,
     paneLoading,
+    isLoadingCandles,
     toggleIndicatorVisibility,
     removeIndicator,
     removeCompareSymbol,
@@ -427,7 +428,10 @@ export function ChartCanvas({
   const paneSource: DataSourceKind = isActivePane
     ? (paneDataSources[paneIndex] ?? liveQuote?.source ?? 'simulated')
     : (liveQuote?.source ?? paneDataSources[paneIndex] ?? 'simulated');
-  const isPaneLoading = Boolean(paneLoading[paneIndex]);
+  const isPaneLoading =
+    Boolean(paneLoading[paneIndex]) || (isActivePane && isLoadingCandles);
+  const autoScaleRef = useRef(pane.autoScale);
+  autoScaleRef.current = pane.autoScale;
 
   const effectiveScaleMode =
     pane.compareSymbols.length > 0 && pane.scaleMode !== 'indexed100'
@@ -572,6 +576,16 @@ export function ChartCanvas({
 
   // Drawing interaction state
   const [draftDrawing, setDraftDrawing] = useState<DrawingObject | null>(null);
+  const draftDrawingRef = useRef<DrawingObject | null>(null);
+  draftDrawingRef.current = draftDrawing;
+
+  // Guard against mobile synthetic mouse events fired ~50ms after touchend
+  const lastTouchMsRef = useRef<number>(0);
+  const isSyntheticMouseAfterTouch = useCallback(
+    () => Date.now() - lastTouchMsRef.current < 650,
+    [],
+  );
+
   const [textInputState, setTextInputState] = useState<{
     screen: ScreenPoint;
     points: DrawingPoint[];
@@ -782,8 +796,11 @@ export function ChartCanvas({
         selectedDrawingId &&
         !lockDrawings
       ) {
-        ev.preventDefault();
-        deleteDrawing(symbol.ticker, selectedDrawingId);
+        const selected = paneDrawings.find((d) => d.id === selectedDrawingId);
+        if (selected && !selected.locked) {
+          ev.preventDefault();
+          deleteDrawing(symbol.ticker, selectedDrawingId);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -797,6 +814,7 @@ export function ChartCanvas({
     setActiveTool,
     selectedDrawingId,
     setSelectedDrawingId,
+    paneDrawings,
     lockDrawings,
     deleteDrawing,
     addDrawing,
@@ -868,12 +886,15 @@ export function ChartCanvas({
       const layout = layoutRef.current;
       if (!layout) return;
 
-      const barIndex = Math.max(
-        0,
-        Math.min(rawCandles.length - 1, Math.round(xToIndex(localX, layout))),
-      );
+      const barIndex =
+        rawCandles.length > 0
+          ? Math.max(
+              0,
+              Math.min(rawCandles.length - 1, Math.round(xToIndex(localX, layout))),
+            )
+          : -1;
       const price = yToPrice(localY, layout);
-      const timestamp = indexToTime(barIndex, rawCandles);
+      const timestamp = indexToTime(Math.max(0, barIndex), rawCandles);
 
       if (isPointInPriceAxis(localX, localY, layout)) {
         onChartContextMenu({
@@ -949,7 +970,9 @@ export function ChartCanvas({
   const placeDrawingPointAt = useCallback(
     (x: number, y: number): boolean => {
       const layout = layoutRef.current;
-      if (!layout || !isPointInMainPlot(x, y, layout)) return false;
+      if (!layout || rawCandles.length === 0 || !isPointInMainPlot(x, y, layout)) {
+        return false;
+      }
 
       if (canonicalTool === 'eraser') {
         if (lockDrawings) return true;
@@ -1153,10 +1176,20 @@ export function ChartCanvas({
     ],
   );
 
-  // Touch state ref for mobile pan, 2D free pan, axis drag, pinch zoom, double-tap & long-press
-  const lastTapRef = useRef<{ time: number; zone: 'priceAxis' | 'timeAxis' | 'plot' }>({
+  const placeDrawingPointAtRef = useRef(placeDrawingPointAt);
+  placeDrawingPointAtRef.current = placeDrawingPointAt;
+
+  // Touch state ref for mobile pan, 2D free pan, axis drag, pinch zoom, zoom-box, touch-drawing, double-tap & long-press
+  const lastTapRef = useRef<{
+    time: number;
+    zone: 'priceAxis' | 'timeAxis' | 'plot';
+    x: number;
+    y: number;
+  }>({
     time: 0,
     zone: 'plot',
+    x: 0,
+    y: 0,
   });
   const longPressTimerRef = useRef<number | null>(null);
 
@@ -1191,9 +1224,26 @@ export function ChartCanvas({
         kind: 'freehand';
         drawing: DrawingObject;
       }
+    | {
+        kind: 'zoomBox';
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+      }
+    | {
+        kind: 'drawDrag';
+        startX: number;
+        startY: number;
+        lastX: number;
+        lastY: number;
+        dragged: boolean;
+        startedWithDraft: boolean;
+        point1Anchored: boolean;
+      }
   >(null);
 
-  // Native non-passive touch listeners for smooth 1:1 mobile gestures
+  // Native non-passive touch listeners for smooth 1:1 mobile gestures & bulletproof touch drawing
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1216,6 +1266,7 @@ export function ChartCanvas({
     };
 
     const onTouchStart = (ev: TouchEvent) => {
+      lastTouchMsRef.current = Date.now();
       if (ev.touches.length === 0) return;
       ev.preventDefault();
       onFocusPane(paneIndex);
@@ -1223,6 +1274,11 @@ export function ChartCanvas({
       if (!layout) return;
 
       clearLongPress();
+
+      if (rawCandles.length === 0) {
+        touchRef.current = null;
+        return;
+      }
 
       if (ev.touches.length >= 2) {
         const p0 = getLocal(ev.touches[0]);
@@ -1244,14 +1300,19 @@ export function ChartCanvas({
       }
 
       const p = getLocal(ev.touches[0]);
+      const inMainPlot = isPointInMainPlot(p.x, p.y, layout);
 
-      // Freehand drawing via touch (brush / highlighter)
+      // 1) Zoom-In Box drag via touch
+      if (canonicalTool === 'zoom_box' && inMainPlot) {
+        const box: ZoomBoxOverlay = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+        touchRef.current = { kind: 'zoomBox', ...box };
+        setZoomBox(box);
+        return;
+      }
+
+      // 2) Freehand drawing via touch (brush / highlighter)
       const meta = DRAWING_TOOL_REGISTRY[canonicalTool];
-      if (
-        meta.pointCount === 'freehand' &&
-        !lockDrawings &&
-        isPointInMainPlot(p.x, p.y, layout)
-      ) {
+      if (meta.pointCount === 'freehand' && !lockDrawings && inMainPlot) {
         const pt = screenToDrawingPoint(p.x, p.y);
         if (pt) {
           const draft: DrawingObject = {
@@ -1271,15 +1332,28 @@ export function ChartCanvas({
         }
       }
 
+      // 3) Active persistable drawing tool (1..6-pt, multi-pt, measure):
+      //    Dedicated drawing interaction (tap-tap OR press-drag preview without accidentally panning!)
+      if (!isCursorOrUtilityTool(activeTool) && !lockDrawings && inMainPlot) {
+        const hadDraft = Boolean(draftDrawingRef.current);
+        touchRef.current = {
+          kind: 'drawDrag',
+          startX: p.x,
+          startY: p.y,
+          lastX: p.x,
+          lastY: p.y,
+          dragged: false,
+          startedWithDraft: hadDraft,
+          point1Anchored: hadDraft,
+        };
+        return;
+      }
+
       const zone: 'priceAxis' | 'timeAxis' | 'plot' = isPointInPriceAxis(p.x, p.y, layout)
         ? 'priceAxis'
         : isPointInTimeAxis(p.x, p.y, layout)
           ? 'timeAxis'
           : 'plot';
-
-      if (zone === 'priceAxis' && pane.autoScale) {
-        updatePane(paneIndex, { autoScale: false });
-      }
 
       touchRef.current = {
         kind: 'single',
@@ -1307,14 +1381,16 @@ export function ChartCanvas({
     };
 
     const onTouchMove = (ev: TouchEvent) => {
+      lastTouchMsRef.current = Date.now();
       const state = touchRef.current;
       const layout = layoutRef.current;
-      if (!state || !layout || ev.touches.length === 0) return;
+      if (!state || !layout || ev.touches.length === 0 || rawCandles.length === 0) return;
       ev.preventDefault();
 
-      // Upgrade 1-finger to 2-finger pinch cleanly
+      // Upgrade 1-finger to 2-finger pinch cleanly (even while a drawing tool is selected!)
       if (ev.touches.length >= 2 && state.kind !== 'pinch') {
         clearLongPress();
+        if (state.kind === 'zoomBox') setZoomBox(null);
         const p0 = getLocal(ev.touches[0]);
         const p1 = getLocal(ev.touches[1]);
         const dx = Math.abs(p1.x - p0.x);
@@ -1363,8 +1439,9 @@ export function ChartCanvas({
         let nextManualMin = state.startVp.manualMin ?? null;
         let nextManualMax = state.startVp.manualMax ?? null;
         let nextYZoom = state.startVp.yZoom;
-        if (predominantlyVertical || !pane.autoScale) {
-          if (predominantlyVertical && pane.autoScale) {
+        if (predominantlyVertical || !autoScaleRef.current) {
+          if (predominantlyVertical && autoScaleRef.current) {
+            autoScaleRef.current = false;
             updatePane(paneIndex, { autoScale: false });
           }
           const baseSpan = Math.max(1e-12, state.startMax - state.startMin);
@@ -1393,6 +1470,14 @@ export function ChartCanvas({
       }
 
       const p = getLocal(ev.touches[0]);
+
+      if (state.kind === 'zoomBox') {
+        state.x2 = Math.max(layout.plotLeft, Math.min(layout.plotRight, p.x));
+        state.y2 = Math.max(layout.mainRect.top, Math.min(layout.mainRect.bottom, p.y));
+        setZoomBox({ x1: state.x1, y1: state.y1, x2: state.x2, y2: state.y2 });
+        return;
+      }
+
       if (state.kind === 'freehand') {
         const pt = screenToDrawingPoint(p.x, p.y);
         if (pt) {
@@ -1405,17 +1490,58 @@ export function ChartCanvas({
         return;
       }
 
+      if (state.kind === 'drawDrag') {
+        state.lastX = Math.max(layout.plotLeft, Math.min(layout.plotRight, p.x));
+        state.lastY = Math.max(layout.mainRect.top, Math.min(layout.mainRect.bottom, p.y));
+        const dist = Math.hypot(p.x - state.startX, p.y - state.startY);
+        const meta = DRAWING_TOOL_REGISTRY[canonicalTool];
+
+        if (!state.dragged && dist > 14) {
+          state.dragged = true;
+          // Anchor point 1 on press-drag for 2+ point tools (measure, trendline, fib, rectangle, etc.)
+          if (!state.point1Anchored && meta.pointCount !== 1) {
+            state.point1Anchored = true;
+            placeDrawingPointAtRef.current(state.startX, state.startY);
+          }
+        }
+
+        if (state.dragged || state.startedWithDraft) {
+          const pt = screenToDrawingPoint(state.lastX, state.lastY);
+          if (pt) {
+            setDraftDrawing((prev) => {
+              if (!prev) return null;
+              return { ...prev, points: prev.points.slice(0, -1).concat(pt) };
+            });
+          }
+          const barIndex = Math.max(
+            0,
+            Math.min(rawCandles.length - 1, Math.round(xToIndex(state.lastX, layout))),
+          );
+          setCrosshair({ x: state.lastX, y: state.lastY, barIndex, visible: true });
+          if (isActivePane) {
+            setHoveredIdx(barIndex);
+            onHoverCandle?.(rawCandles[barIndex] ?? null, barIndex);
+          }
+        }
+        return;
+      }
+
       if (state.kind === 'single') {
         if (state.longPressed) return;
         const dx = p.x - state.startX;
         const dy = p.y - state.startY;
-        if (!state.moved && Math.hypot(dx, dy) > 6) {
+        const slop = canonicalTool === 'eraser' ? 12 : 6;
+        if (!state.moved && Math.hypot(dx, dy) > slop) {
           state.moved = true;
           clearLongPress();
         }
         if (!state.moved) return;
 
         if (state.zone === 'priceAxis') {
+          if (autoScaleRef.current) {
+            autoScaleRef.current = false;
+            updatePane(paneIndex, { autoScale: false });
+          }
           const baseSpan = Math.max(1e-12, state.startMax - state.startMin);
           const nextSpan = Math.max(
             state.rawSpan / 20,
@@ -1443,7 +1569,7 @@ export function ChartCanvas({
               state.startVp.rightIndex - deltaBars,
             ),
           );
-          if (pane.autoScale) {
+          if (autoScaleRef.current) {
             setViewport((vp) => ({ ...vp, rightIndex: nextRight }));
           } else {
             const ySign = invertScale ? -1 : 1;
@@ -1472,10 +1598,17 @@ export function ChartCanvas({
     };
 
     const onTouchEnd = () => {
+      lastTouchMsRef.current = Date.now();
       clearLongPress();
       const state = touchRef.current;
       touchRef.current = null;
       if (!state) return;
+
+      if (state.kind === 'zoomBox') {
+        setZoomBox(null);
+        applyZoomBox({ x1: state.x1, y1: state.y1, x2: state.x2, y2: state.y2 });
+        return;
+      }
 
       if (state.kind === 'freehand') {
         if (state.drawing.points.length >= 2) {
@@ -1486,18 +1619,33 @@ export function ChartCanvas({
         return;
       }
 
+      if (state.kind === 'drawDrag') {
+        // Both tap-tap (not dragged) AND press-drag-release (dragged) place/commit cleanly!
+        const targetX = state.dragged ? state.lastX : state.startX;
+        const targetY = state.dragged ? state.lastY : state.startY;
+        placeDrawingPointAtRef.current(targetX, targetY);
+        return;
+      }
+
       if (state.kind === 'single' && !state.moved && !state.longPressed) {
         const layout = layoutRef.current;
-        if (!layout) return;
+        if (!layout || rawCandles.length === 0) return;
 
-        // Detect double-tap on Price Axis or Time Axis
+        // Detect double-tap on Price Axis or Time Axis (420ms mobile thumb window + 44px proximity)
         const now = Date.now();
         const isDoubleTap =
-          now - lastTapRef.current.time < 320 &&
-          lastTapRef.current.zone === state.zone;
-        lastTapRef.current = { time: now, zone: state.zone };
+          now - lastTapRef.current.time <= 420 &&
+          lastTapRef.current.zone === state.zone &&
+          Math.hypot(
+            state.startX - lastTapRef.current.x,
+            state.startY - lastTapRef.current.y,
+          ) <= 44;
+        lastTapRef.current = isDoubleTap
+          ? { time: 0, zone: 'plot', x: 0, y: 0 }
+          : { time: now, zone: state.zone, x: state.startX, y: state.startY };
 
         if (isDoubleTap && state.zone === 'priceAxis') {
+          autoScaleRef.current = true;
           updatePane(paneIndex, { autoScale: true });
           setViewport((vp) => ({
             ...vp,
@@ -1536,12 +1684,12 @@ export function ChartCanvas({
           return;
         }
 
-        // Tap with active drawing tool places anchor point
-        if (placeDrawingPointAt(state.startX, state.startY)) {
+        // Tap with eraser or active drawing tool
+        if (placeDrawingPointAtRef.current(state.startX, state.startY)) {
           return;
         }
 
-        // Otherwise tap updates crosshair + selects drawing if hit
+        // Otherwise tap updates crosshair + selects drawing (or deselects on empty space)
         const barIndex = Math.max(
           0,
           Math.min(
@@ -1580,12 +1728,12 @@ export function ChartCanvas({
   }, [
     paneIndex,
     onFocusPane,
+    activeTool,
     canonicalTool,
     lockDrawings,
     screenToDrawingPoint,
     symbol.ticker,
     pane.timeframe,
-    pane.autoScale,
     invertScale,
     rightMarginBars,
     updatePane,
@@ -1593,7 +1741,7 @@ export function ChartCanvas({
     isActivePane,
     onHoverCandle,
     commitCompletedDrawing,
-    placeDrawingPointAt,
+    applyZoomBox,
     findHitDrawing,
     setSelectedDrawingId,
     emitContextMenuAt,
@@ -1613,12 +1761,12 @@ export function ChartCanvas({
       const x = ev.clientX - rect.left;
       const y = ev.clientY - rect.top;
       const layout = layoutRef.current;
-      if (!layout) return;
+      if (!layout || rawCandles.length === 0) return;
 
       // 1) Wheel OVER Price Axis -> VERTICAL ZOOM ONLY (never touches visibleBars/rightIndex!)
       if (isPointInPriceAxis(x, y, layout)) {
-        const wasAuto = pane.autoScale;
-        if (wasAuto) {
+        if (autoScaleRef.current) {
+          autoScaleRef.current = false;
           updatePane(paneIndex, { autoScale: false });
         }
         const spanFactor = ev.deltaY > 0 ? 1.14 : 0.88;
@@ -1632,11 +1780,11 @@ export function ChartCanvas({
 
         setViewport((vp) => {
           const curMin =
-            !wasAuto && vp.manualMin != null && vp.manualMax != null
+            vp.manualMin != null && vp.manualMax != null
               ? vp.manualMin
               : layout.mainMin;
           const curMax =
-            !wasAuto && vp.manualMin != null && vp.manualMax != null
+            vp.manualMin != null && vp.manualMax != null
               ? vp.manualMax
               : layout.mainMax;
           const curSpan = Math.max(1e-12, curMax - curMin);
@@ -1694,12 +1842,13 @@ export function ChartCanvas({
   }, [rawCandles.length, pane.autoScale, paneIndex, updatePane]);
 
   const handleMouseDown = (ev: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (isSyntheticMouseAfterTouch()) return;
     if (ev.button !== 0) return;
     onFocusPane(paneIndex);
 
     const canvas = canvasRef.current;
     const layout = layoutRef.current;
-    if (!canvas || !layout) return;
+    if (!canvas || !layout || rawCandles.length === 0) return;
 
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
@@ -1732,7 +1881,8 @@ export function ChartCanvas({
         startMax: layout.mainMax,
         rawSpan: layout.rawMainSpan,
       };
-      if (pane.autoScale) {
+      if (autoScaleRef.current) {
+        autoScaleRef.current = false;
         updatePane(paneIndex, { autoScale: false });
       }
       return;
@@ -1808,6 +1958,7 @@ export function ChartCanvas({
   };
 
   const handleMouseMove = (ev: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (isSyntheticMouseAfterTouch()) return;
     const canvas = canvasRef.current;
     const layout = layoutRef.current;
     if (!canvas || !layout) return;
@@ -1830,6 +1981,8 @@ export function ChartCanvas({
     } else {
       setHoverZone('plot');
     }
+
+    if (rawCandles.length === 0) return;
 
     const barIndex = Math.max(
       0,
@@ -1880,7 +2033,7 @@ export function ChartCanvas({
           drag.startVp.rightIndex - deltaBars,
         ),
       );
-      if (pane.autoScale) {
+      if (autoScaleRef.current) {
         setViewport((vp) => ({ ...vp, rightIndex: nextRight }));
       } else {
         const ySign = invertScale ? -1 : 1;
@@ -1949,6 +2102,7 @@ export function ChartCanvas({
   };
 
   const handleMouseUp = () => {
+    if (isSyntheticMouseAfterTouch()) return;
     const drag = dragRef.current;
     dragRef.current = null;
     setIsDraggingPan(false);
@@ -1979,15 +2133,17 @@ export function ChartCanvas({
   };
 
   const handleDoubleClick = (ev: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (isSyntheticMouseAfterTouch()) return;
     const canvas = canvasRef.current;
     const layout = layoutRef.current;
-    if (!canvas || !layout) return;
+    if (!canvas || !layout || rawCandles.length === 0) return;
     const rect = canvas.getBoundingClientRect();
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
 
     // 1) Double-click on Price Axis -> resets autoScale = true, yZoom = 1, yOffset = 0
     if (isPointInPriceAxis(x, y, layout)) {
+      autoScaleRef.current = true;
       updatePane(paneIndex, { autoScale: true });
       setViewport((vp) => ({
         ...vp,
@@ -2096,11 +2252,13 @@ export function ChartCanvas({
     }
   };
 
-  // Legend OHLCV metrics
+  // Legend OHLCV metrics (safe when rawCandles is [] while real data hydrates)
   const prevBar =
     hoveredIdx !== null && hoveredIdx > 0
       ? rawCandles[hoveredIdx - 1]
-      : rawCandles[rawCandles.length - 2];
+      : rawCandles.length >= 2
+        ? rawCandles[rawCandles.length - 2]
+        : undefined;
   const barDelta = legendBar
     ? legendBar.close - (prevBar?.close ?? legendBar.open)
     : 0;
@@ -2211,6 +2369,19 @@ export function ChartCanvas({
         onContextMenu={handleContextMenu}
       />
 
+      {/* ======================== REAL-DATA LOADING OVERLAY ======================== */}
+      {isPaneLoading && rawCandles.length === 0 && (
+        <div className="sc-loading-overlay" role="status" aria-live="polite">
+          <div className="sc-loading-card">
+            <span className="sc-loading-ring" aria-hidden="true" />
+            <span className="sc-loading-title">Caricamento dati reali…</span>
+            <span className="sc-loading-sub">
+              {symbol.ticker} · {pane.timeframe} · {symbol.exchange}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ======================== TOP-LEFT OHLCV & INDICATOR LEGEND ======================== */}
       <div className="sc-legend-overlay" style={legendPositionStyle}>
         <div className="sc-legend-main-row" style={legendBgStyle}>
@@ -2239,14 +2410,14 @@ export function ChartCanvas({
             </span>
           </button>
 
-          {statusCfg.showOpenMarketStatus && (
+          {statusCfg.showOpenMarketStatus && !(isPaneLoading && rawCandles.length === 0) && (
             <span className={badge.className} title={badge.title}>
               <span className="sc-source-dot" />
               {badge.label}
             </span>
           )}
 
-          {isPaneLoading && (
+          {isPaneLoading && rawCandles.length > 0 && (
             <span className="sc-loading-pill" role="status" aria-live="polite">
               <span className="sc-loading-spinner" />
               Aggiornamento...

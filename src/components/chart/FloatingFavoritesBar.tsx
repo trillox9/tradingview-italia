@@ -26,9 +26,10 @@ interface BarPosition {
 function loadInitialPosition(): BarPosition {
   const defaultPos = (): BarPosition => {
     if (typeof window === 'undefined') return { x: 68, y: 140 };
+    const isMobile = window.innerWidth <= 900;
     return {
-      x: 68,
-      y: Math.max(120, window.innerHeight - 156),
+      x: isMobile ? 10 : 68,
+      y: Math.max(120, window.innerHeight - (isMobile ? 146 : 156)),
     };
   };
 
@@ -54,7 +55,7 @@ function loadInitialPosition(): BarPosition {
 function clampPosition(pos: BarPosition, barW: number, barH: number): BarPosition {
   if (typeof window === 'undefined') return pos;
   const maxX = Math.max(8, window.innerWidth - barW - 8);
-  const maxY = Math.max(44, window.innerHeight - barH - 42);
+  const maxY = Math.max(44, window.innerHeight - barH - 70);
   return {
     x: Math.max(8, Math.min(maxX, Math.round(pos.x))),
     y: Math.max(44, Math.min(maxY, Math.round(pos.y))),

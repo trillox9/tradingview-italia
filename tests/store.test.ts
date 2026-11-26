@@ -6,7 +6,15 @@ import {
   mergeChartSettings,
   type DrawingObject,
 } from '../src/types';
-import { DEFAULT_WATCHLISTS, MarketFeed, getCandlesForSymbol } from '../src/data';
+import snapshotJson from '../public/real-market-snapshot.json';
+import {
+  DEFAULT_WATCHLISTS,
+  MarketFeed,
+  clearRealMarketCaches,
+  getCandlesForSymbol,
+  parseRealSnapshot,
+  setLoadedSnapshotForTest,
+} from '../src/data';
 import {
   DEFAULT_INDICATOR_PRESETS,
   PINE_TEMPLATES,
@@ -39,6 +47,7 @@ import {
   parseRoute,
   redoDrawingMutation,
   removeSymbolFromWatchlistList,
+  resolveInitialPaneSeriesState,
   resolveSymbolInfo,
   savePersistedActiveWatchlistId,
   savePersistedChartSettings,
@@ -132,6 +141,39 @@ describe('Store Pure Helpers, ChartSettings & Pro Drawing Mutations (src/store/s
     expect(panes[0].priceScalePosition).toBe('right');
     // Avoid duplicating primary symbol in pane 2
     expect(panes[1].symbolId).toBe('FTSEMIB');
+  });
+
+  it('eliminates simulated candle flash in browser mode until real cache/snapshot is ready', () => {
+    clearRealMarketCaches();
+
+    // Browser mode with cold cache: live crypto & Yahoo stocks start empty + loading (ZERO fake flash!)
+    const coldCrypto = resolveInitialPaneSeriesState('BTCUSDT', '1D', false);
+    expect(coldCrypto.candles).toEqual([]);
+    expect(coldCrypto.isLoading).toBe(true);
+
+    const coldStock = resolveInitialPaneSeriesState('RACE', '1D', false);
+    expect(coldStock.candles).toEqual([]);
+    expect(coldStock.isLoading).toBe(true);
+
+    // Once real Yahoo snapshot is hydrated, 1D/1W/1M open instantaneously with real snapshot bars (no spinner, no fake flash)
+    const parsedSnap = parseRealSnapshot(snapshotJson);
+    setLoadedSnapshotForTest(parsedSnap);
+    const hydratedDaily = resolveInitialPaneSeriesState('RACE', '1D', false);
+    expect(hydratedDaily.isLoading).toBe(false);
+    expect(hydratedDaily.dataSource).toBe('snapshot');
+    expect(hydratedDaily.candles.length).toBeGreaterThan(100);
+
+    // Intraday Yahoo timeframe without live cache stays loading (zero fake flash)
+    const coldIntraday = resolveInitialPaneSeriesState('RACE', '15m', false);
+    expect(coldIntraday.candles).toEqual([]);
+    expect(coldIntraday.isLoading).toBe(true);
+
+    clearRealMarketCaches();
+
+    // Vitest deterministic mode stays synchronous with 320 bars and isLoading=false
+    const testMode = resolveInitialPaneSeriesState('BTCUSDT', '1D', true);
+    expect(testMode.candles).toHaveLength(320);
+    expect(testMode.isLoading).toBe(false);
   });
 
   it('merges and persists authentic 6-tab ChartSettings per theme', () => {

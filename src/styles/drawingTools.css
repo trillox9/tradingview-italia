@@ -135,37 +135,40 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
   color: var(--dt-star);
 }
 
-/* Right-edge flyout trigger caret (>) */
-.sc-dt-caret {
+/* Right-edge flyout trigger indicator (>) inside unified single-click button */
+.sc-dt-btn--group {
+  width: 44px;
+  padding-right: 4px;
+}
+
+.sc-dt-caret-indicator {
   position: absolute;
-  right: 1px;
+  right: 2px;
   top: 50%;
   transform: translateY(-50%);
-  width: 11px;
-  height: 28px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--dt-text-muted);
+  width: 8px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
-  cursor: pointer;
-  opacity: 0.35;
-  transition: opacity 110ms ease, background 110ms ease, color 110ms ease;
+  color: var(--dt-text-muted);
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 110ms ease, color 110ms ease;
 }
 
-.sc-dt-slot:hover .sc-dt-caret,
-.sc-dt-caret--open,
-.sc-dt-slot--active .sc-dt-caret {
+.sc-dt-slot:hover .sc-dt-caret-indicator,
+.sc-dt-caret-indicator--open,
+.sc-dt-slot--active .sc-dt-caret-indicator {
   opacity: 1;
 }
 
-.sc-dt-caret:hover,
-.sc-dt-caret--open {
-  background: var(--dt-hover);
-  color: var(--dt-text-strong);
+.sc-dt-caret-indicator--open {
+  color: var(--dt-active-text);
+}
+
+.sc-dt-mobile-backdrop {
+  display: none;
 }
 
 .sc-dt-sep {
@@ -989,6 +992,18 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
 
 /* ======================== 6. RESPONSIVE MOBILE / TABLET ======================== */
 @media (max-width: 900px) {
+  .sc-dt-mobile-backdrop {
+    display: block;
+    position: fixed;
+    top: 40px;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 52;
+    background: rgba(0, 0, 0, 0.32);
+    touch-action: none;
+  }
+
   .sc-left-bar {
     position: fixed;
     top: 44px;
@@ -1000,6 +1015,7 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
     border: 1px solid var(--dt-border);
     box-shadow: var(--dt-shadow);
     z-index: 55;
+    touch-action: pan-y;
   }
 
   .sc-left-bar--mobile-hidden {
@@ -1008,19 +1024,81 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
 
   .sc-dt-slot {
     width: 48px;
+    height: 40px;
+  }
+
+  .sc-dt-btn {
+    width: 40px;
+    height: 38px;
+    touch-action: manipulation;
+  }
+
+  .sc-dt-btn--group {
+    width: 42px;
   }
 
   /* Make caret comfortably visible on touch devices */
-  .sc-dt-caret {
-    opacity: 0.72;
+  .sc-dt-caret-indicator {
+    opacity: 0.78;
+  }
+
+  .sc-dt-flyout {
+    max-width: min(310px, calc(100vw - 68px));
+    max-height: calc(100vh - 64px);
+    max-height: calc(100dvh - 64px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sc-dt-flyout-main {
+    min-height: 40px;
+    padding: 8px 10px;
+    touch-action: manipulation;
   }
 
   .sc-dt-star-btn {
-    opacity: 0.7;
+    opacity: 0.78;
+    width: 34px;
+    height: 34px;
+    touch-action: manipulation;
   }
 }
 
 @media (max-width: 640px) {
+  .sc-fav-bar {
+    max-width: calc(100vw - 16px);
+    padding: 4px 6px 4px 4px;
+  }
+
+  .sc-fav-btn {
+    width: 34px;
+    height: 34px;
+    touch-action: manipulation;
+  }
+
+  .sc-float-draw-bar {
+    max-width: calc(100vw - 16px);
+    padding: 4px 6px 4px 4px;
+    gap: 2px;
+  }
+
+  .sc-fdt-btn {
+    height: 32px;
+    min-width: 32px;
+    padding: 0 7px;
+    touch-action: manipulation;
+  }
+
+  .sc-drag-grip {
+    width: 24px;
+    height: 32px;
+  }
+
+  .sc-swatch-cell {
+    width: 28px;
+    height: 28px;
+  }
+
   .sc-drw-fib-grid,
   .sc-drw-coord-fields {
     grid-template-columns: 1fr;
@@ -1028,5 +1106,35 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
 
   .sc-drw-modal {
     max-height: calc(100vh - 20px);
+  }
+}
+
+@media (max-width: 480px) {
+  .sc-float-draw-bar {
+    padding: 3px 4px 3px 3px;
+    gap: 1px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sc-float-draw-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sc-fdt-btn {
+    min-width: 26px;
+    height: 30px;
+    padding: 0 4px;
+    font-size: 11px;
+  }
+
+  .sc-float-draw-bar .sc-drag-grip {
+    width: 18px;
+    height: 30px;
+  }
+
+  .sc-fdt-sep {
+    margin: 0 1px;
   }
 }

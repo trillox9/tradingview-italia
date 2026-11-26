@@ -526,8 +526,18 @@ function ttlForTimeframe(timeframe: Timeframe): number {
   }
 }
 
-async function fetchJsonWithTimeout(url: string, timeoutMs = 9000): Promise<unknown> {
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs = 9000,
+  externalSignal?: AbortSignal,
+): Promise<unknown> {
+  if (externalSignal?.aborted) return null;
+
   const ctrl = new AbortController();
+  const onExternalAbort = () => ctrl.abort();
+  if (externalSignal) {
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: ctrl.signal });
@@ -537,6 +547,9 @@ async function fetchJsonWithTimeout(url: string, timeoutMs = 9000): Promise<unkn
     return null;
   } finally {
     clearTimeout(timer);
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
   }
 }
 
@@ -564,6 +577,9 @@ export async function loadRealSnapshot(): Promise<RealMarketSnapshot | null> {
 
   return snapshotLoadPromise;
 }
+
+/** Alias for eager snapshot hydration at module startup or store init */
+export const hydrateRealSnapshot = loadRealSnapshot;
 
 /** Allows tests or SSR hydration to seed the snapshot cache synchronously */
 export function setLoadedSnapshotForTest(snapshot: RealMarketSnapshot | null): void {
@@ -660,8 +676,14 @@ export async function fetchBinanceKlines(
   symbol: SymbolInfo,
   timeframe: Timeframe,
   limit = 300,
+  signal?: AbortSignal,
 ): Promise<Candle[]> {
-  if (isTestEnvironment() || typeof fetch === 'undefined' || !symbol.binanceSymbol) {
+  if (
+    isTestEnvironment() ||
+    typeof fetch === 'undefined' ||
+    !symbol.binanceSymbol ||
+    signal?.aborted
+  ) {
     return [];
   }
 
@@ -675,10 +697,12 @@ export async function fetchBinanceKlines(
   const pair = symbol.ticker.toUpperCase();
 
   for (const base of BINANCE_REST_BASES) {
+    if (signal?.aborted) return [];
     const url = `${base}/api/v3/klines?symbol=${encodeURIComponent(
       pair,
     )}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
-    const raw = await fetchJsonWithTimeout(url, 9000);
+    const raw = await fetchJsonWithTimeout(url, 9000, signal);
+    if (signal?.aborted) return [];
     const candles = parseBinanceKlines(raw);
     if (candles.length > 0) {
       klineCache.set(cacheKey, {
@@ -699,13 +723,25 @@ function isLocalhostRuntime(): boolean {
   return host === 'localhost' || host === '127.0.0.1';
 }
 
+export interface FetchYahooChartOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 /** Fetches live Yahoo Finance v8 chart candles + quote via local Vite proxy (localhost) or verified allorigins CORS relay (GitHub Pages) */
 export async function fetchYahooChart(
   symbol: SymbolInfo,
   timeframe: Timeframe,
   forceRefresh = false,
+  options?: FetchYahooChartOptions,
 ): Promise<{ candles: Candle[]; quote: QuoteTick | null } | null> {
-  if (isTestEnvironment() || typeof fetch === 'undefined' || !symbol.yahooSymbol) {
+  const signal = options?.signal;
+  if (
+    isTestEnvironment() ||
+    typeof fetch === 'undefined' ||
+    !symbol.yahooSymbol ||
+    signal?.aborted
+  ) {
     return null;
   }
 
@@ -725,6 +761,7 @@ export async function fetchYahooChart(
     symbol.yahooSymbol,
   )}?interval=${spec.interval}&range=${spec.range}&includePrePost=false`;
   const directYahooUrl = `https://query2.finance.yahoo.com${yahooPath}`;
+  const reqTimeout = options?.timeoutMs ?? 9000;
 
   const tryParse = (raw: unknown) => {
     const parsed = parseYahooChartResponse(raw, symbol, spec.aggregateHours);
@@ -745,16 +782,25 @@ export async function fetchYahooChart(
 
   // 1. Local Vite dev proxy (fastest, zero rate-limit sharing when running `npm run dev`)
   if (isLocalhostRuntime()) {
-    const localRaw = await fetchJsonWithTimeout(`/api/yahoo${yahooPath}`, 7000);
+    const localRaw = await fetchJsonWithTimeout(
+      `/api/yahoo${yahooPath}`,
+      Math.min(7000, reqTimeout),
+      signal,
+    );
+    if (signal?.aborted) return null;
     const localParsed = tryParse(localRaw);
     if (localParsed) return localParsed;
   }
 
+  if (signal?.aborted) return null;
+
   // 2. Verified public CORS relay for static GitHub Pages (`api.allorigins.win/get`, ACAO: *)
   const allOriginsWrapped = await fetchJsonWithTimeout(
     `https://api.allorigins.win/get?url=${encodeURIComponent(directYahooUrl)}`,
-    10_000,
+    reqTimeout,
+    signal,
   );
+  if (signal?.aborted) return null;
   if (
     allOriginsWrapped &&
     typeof allOriginsWrapped === 'object' &&
@@ -771,11 +817,15 @@ export async function fetchYahooChart(
     }
   }
 
+  if (signal?.aborted) return null;
+
   // 3. Secondary raw relay fallback
   const allOriginsRaw = await fetchJsonWithTimeout(
     `https://api.allorigins.win/raw?url=${encodeURIComponent(directYahooUrl)}`,
-    9000,
+    reqTimeout,
+    signal,
   );
+  if (signal?.aborted) return null;
   const rawParsed = tryParse(allOriginsRaw);
   if (rawParsed) return rawParsed;
 
@@ -783,22 +833,173 @@ export async function fetchYahooChart(
 }
 
 /**
- * Unified real historical candle resolver for any catalog symbol & timeframe:
- * - Crypto (`binanceSymbol`): Binance Vision direct REST (`/api/v3/klines`)
- * - Stocks/Indices/FX/Futures/ETFs (`yahooSymbol`): Yahoo Finance live chart -> pre-fetched Yahoo snapshot
+ * Patches ONLY the latest bar (or appends strictly newer bars) when a background
+ * live Yahoo update arrives after real snapshot data is already rendered — avoiding
+ * any jarring full-history replacement or chart jump.
  */
-export async function fetchRealCandles(
-  symbol: SymbolInfo,
-  timeframe: Timeframe,
-): Promise<{
+export function mergeLatestBarIntoSeries(
+  existing: readonly Candle[],
+  incoming: readonly Candle[],
+  timeframe: Timeframe = '1D',
+): Candle[] {
+  if (existing.length === 0) return incoming.map((c) => ({ ...c }));
+  if (incoming.length === 0) return existing.slice();
+
+  const out = existing.slice();
+  const tail = out[out.length - 1];
+
+  if (timeframe === '1D') {
+    const tailDay = Math.floor(tail.time / 86400);
+    for (const bar of incoming) {
+      const barDay = Math.floor(bar.time / 86400);
+      if (barDay < tailDay) continue;
+      if (barDay === tailDay) {
+        const curr = out[out.length - 1];
+        out[out.length - 1] = {
+          time: curr.time,
+          open: curr.open,
+          high: Math.max(curr.high, bar.high),
+          low: Math.min(curr.low, bar.low),
+          close: bar.close,
+          volume: Math.max(curr.volume, bar.volume),
+        };
+      } else {
+        const prevTailDay = Math.floor(out[out.length - 1].time / 86400);
+        if (barDay === prevTailDay) {
+          out[out.length - 1] = { ...bar };
+        } else {
+          out.push({ ...bar });
+        }
+      }
+    }
+    return out;
+  }
+
+  for (const bar of incoming) {
+    if (bar.time < tail.time) continue;
+    const curr = out[out.length - 1];
+    if (bar.time === curr.time) {
+      out[out.length - 1] = { ...bar };
+    } else if (bar.time > curr.time) {
+      out.push({ ...bar });
+    }
+  }
+  return out;
+}
+
+export interface RealCandlesResolution {
   candles: Candle[];
   source: DataSourceKind;
   quote?: QuoteTick | null;
-} | null> {
-  if (isTestEnvironment()) return null;
+}
+
+export interface ResolveRealCandlesOptions {
+  signal?: AbortSignal;
+  /** Snappy live-Yahoo budget before falling back cleanly to real snapshot (default: 1200ms) */
+  liveTimeoutMs?: number;
+  /** Invoked ONLY if snapshot was returned first and background live Yahoo finishes later */
+  onLateYahooUpdate?: (res: { candles: Candle[]; quote: QuoteTick | null }) => void;
+  /** Optional dependency injection overrides for deterministic Vitest testing */
+  fetchBinance?: (
+    symbol: SymbolInfo,
+    timeframe: Timeframe,
+    signal?: AbortSignal,
+  ) => Promise<Candle[]>;
+  fetchYahoo?: (
+    symbol: SymbolInfo,
+    timeframe: Timeframe,
+    signal?: AbortSignal,
+  ) => Promise<{ candles: Candle[]; quote: QuoteTick | null } | null>;
+  loadSnapshot?: () => Promise<RealMarketSnapshot | null>;
+  getSnapCandles?: (ticker: string, timeframe: Timeframe) => Candle[] | null;
+  getSnapQuote?: (ticker: string) => QuoteTick | null;
+  /** Allows unit tests to exercise the full async browser strategy with mocked fetchers */
+  bypassTestGuard?: boolean;
+}
+
+function raceYahooWithBudget(
+  yahooPromise: Promise<{ candles: Candle[]; quote: QuoteTick | null } | null>,
+  budgetMs: number,
+  signal?: AbortSignal,
+): Promise<
+  | { status: 'resolved'; value: { candles: Candle[]; quote: QuoteTick | null } | null }
+  | { status: 'timeout' }
+  | { status: 'aborted' }
+> {
+  if (signal?.aborted) {
+    return Promise.resolve({ status: 'aborted' });
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (signal) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
+
+    const finish = (
+      out:
+        | { status: 'resolved'; value: { candles: Candle[]; quote: QuoteTick | null } | null }
+        | { status: 'timeout' }
+        | { status: 'aborted' },
+    ) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(out);
+    };
+
+    const onAbort = () => finish({ status: 'aborted' });
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const timer = setTimeout(() => finish({ status: 'timeout' }), Math.max(0, budgetMs));
+
+    void yahooPromise.then(
+      (value) => finish({ status: 'resolved', value }),
+      () => finish({ status: 'resolved', value: null }),
+    );
+  });
+}
+
+/**
+ * Smart real-data resolver engineered to eliminate double-jumps & fake-chart flashes:
+ * - Crypto (`binanceSymbol`): fetches live Binance klines directly (~150ms) and caches.
+ * - Yahoo (`yahooSymbol`): races live Yahoo against a snappy `1200ms` budget in parallel
+ *   with eager `real-market-snapshot.json` hydration:
+ *   - If live Yahoo returns within budget -> single transition straight to `yahoo`.
+ *   - If live Yahoo exceeds budget or fails -> resolves cleanly from `snapshot` (143/143 symbols),
+ *     silently notifying `onLateYahooUpdate` to patch only the latest bar if live Yahoo arrives later.
+ *   - For intraday Yahoo timeframes where daily snapshot has no bars -> awaits live Yahoo cleanly.
+ *   - Respects `AbortSignal` at every await point so rapid switches never apply stale responses.
+ */
+export async function resolveRealCandlesSmart(
+  symbol: SymbolInfo,
+  timeframe: Timeframe,
+  options: ResolveRealCandlesOptions = {},
+): Promise<RealCandlesResolution | null> {
+  const {
+    signal,
+    liveTimeoutMs = 1200,
+    onLateYahooUpdate,
+    fetchBinance = (s, tf, sig) => fetchBinanceKlines(s, tf, 300, sig),
+    fetchYahoo = (s, tf, sig) => fetchYahooChart(s, tf, false, { signal: sig }),
+    loadSnapshot = loadRealSnapshot,
+    getSnapCandles = getSnapshotCandles,
+    getSnapQuote = getSnapshotQuote,
+    bypassTestGuard = false,
+  } = options;
+
+  if (!bypassTestGuard && isTestEnvironment()) return null;
+  if (signal?.aborted) return null;
 
   if (symbol.isCrypto && symbol.binanceSymbol) {
-    const candles = await fetchBinanceKlines(symbol, timeframe, 300);
+    const candles = await fetchBinance(symbol, timeframe, signal);
+    if (signal?.aborted) return null;
     if (candles.length > 0) {
       return { candles, source: 'binance' };
     }
@@ -806,32 +1007,75 @@ export async function fetchRealCandles(
   }
 
   if (symbol.yahooSymbol) {
-    const yahoo = await fetchYahooChart(symbol, timeframe);
-    if (yahoo && yahoo.candles.length > 0) {
+    const snapshotPromise = loadSnapshot().catch(() => null);
+    const yahooPromise = fetchYahoo(symbol, timeframe, signal).catch(() => null);
+
+    const raced = await raceYahooWithBudget(yahooPromise, liveTimeoutMs, signal);
+    if (raced.status === 'aborted' || signal?.aborted) return null;
+
+    if (raced.status === 'resolved' && raced.value && raced.value.candles.length > 0) {
       return {
-        candles: yahoo.candles,
+        candles: raced.value.candles,
         source: 'yahoo',
-        quote: yahoo.quote,
+        quote: raced.value.quote,
       };
     }
 
-    // Fallback to static real Yahoo snapshot if live relay is temporarily unavailable
-    await loadRealSnapshot();
-    const snapCandles = getSnapshotCandles(symbol.ticker, timeframe);
+    // Live Yahoo either timed out past the snappy budget or returned empty -> check real snapshot
+    await snapshotPromise;
+    if (signal?.aborted) return null;
+
+    const snapCandles = getSnapCandles(symbol.ticker, timeframe);
     if (snapCandles && snapCandles.length > 0) {
+      if (raced.status === 'timeout' && onLateYahooUpdate) {
+        void yahooPromise.then((lateRes) => {
+          if (!signal?.aborted && lateRes && lateRes.candles.length > 0) {
+            onLateYahooUpdate(lateRes);
+          }
+        });
+      }
       return {
         candles: snapCandles,
         source: 'snapshot',
-        quote: getSnapshotQuote(symbol.ticker),
+        quote: getSnapQuote(symbol.ticker),
       };
+    }
+
+    // Intraday timeframe (1m..4H) where daily snapshot doesn't apply: wait for live Yahoo if still pending
+    if (raced.status === 'timeout') {
+      const awaitedYahoo = await yahooPromise;
+      if (signal?.aborted) return null;
+      if (awaitedYahoo && awaitedYahoo.candles.length > 0) {
+        return {
+          candles: awaitedYahoo.candles,
+          source: 'yahoo',
+          quote: awaitedYahoo.quote,
+        };
+      }
     }
   }
 
   return null;
 }
 
+/**
+ * Unified real historical candle resolver for any catalog symbol & timeframe.
+ */
+export async function fetchRealCandles(
+  symbol: SymbolInfo,
+  timeframe: Timeframe,
+  signal?: AbortSignal,
+): Promise<RealCandlesResolution | null> {
+  return resolveRealCandlesSmart(symbol, timeframe, { signal });
+}
+
 export function clearRealMarketCaches(): void {
   klineCache.clear();
   loadedSnapshot = null;
   snapshotLoadPromise = null;
+}
+
+// Eagerly begin hydrating the real Yahoo snapshot at module load in browser environments
+if (!isTestEnvironment() && typeof fetch !== 'undefined') {
+  void hydrateRealSnapshot();
 }

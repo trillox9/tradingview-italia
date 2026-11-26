@@ -46,6 +46,7 @@ export function ChartPage() {
     drawings,
     selectedDrawingId,
     setActiveTool,
+    lockDrawings,
     hideDrawings,
     setHideDrawings,
     deleteDrawing,
@@ -73,6 +74,10 @@ export function ChartPage() {
     };
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const handleToggleDrawingBar = useCallback(() => {
+    setShowDrawingBar((v) => !v);
   }, []);
 
   const handleCloseMobileDrawingBar = useCallback(() => {
@@ -256,7 +261,7 @@ export function ChartPage() {
 
       if ((ev.key === 'Delete' || ev.key === 'Backspace') && selectedDrawingId) {
         const selected = drawings.find((d) => d.id === selectedDrawingId);
-        if (selected && !selected.locked) {
+        if (!lockDrawings && selected && !selected.locked) {
           ev.preventDefault();
           deleteDrawing(activeSymbol.ticker, selected.id);
         }
@@ -323,6 +328,7 @@ export function ChartPage() {
     drawings,
     handleResetView,
     hideDrawings,
+    lockDrawings,
     openModal,
     redo,
     selectedDrawingId,
@@ -346,7 +352,7 @@ export function ChartPage() {
       {/* Top 38px Supercharts Pro Toolbar */}
       <ChartTopToolbar
         showDrawingBar={showDrawingBar}
-        onToggleDrawingBar={() => setShowDrawingBar((v) => !v)}
+        onToggleDrawingBar={handleToggleDrawingBar}
       />
 
       {/* Left 52px Drawing Toolbar (64 tools across 8 authentic groups) */}

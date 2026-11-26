@@ -164,16 +164,17 @@ function getInitialPos(): ToolbarPos {
     // ignore storage errors
   }
   const isNarrow = window.innerWidth <= 640;
+  const isMobile = window.innerWidth <= 900;
   return {
-    x: Math.max(68, Math.round(window.innerWidth * 0.5 - 190)),
-    y: isNarrow ? 128 : 94,
+    x: isMobile ? 8 : Math.max(68, Math.round(window.innerWidth * 0.5 - 190)),
+    y: isNarrow ? 116 : 94,
   };
 }
 
 function clampToolbarPos(pos: ToolbarPos, w: number, h: number): ToolbarPos {
   if (typeof window === 'undefined') return pos;
   const maxX = Math.max(8, window.innerWidth - w - 8);
-  const maxY = Math.max(44, window.innerHeight - h - 46);
+  const maxY = Math.max(44, window.innerHeight - h - 70);
   return {
     x: Math.max(8, Math.min(maxX, Math.round(pos.x))),
     y: Math.max(44, Math.min(maxY, Math.round(pos.y))),
@@ -265,7 +266,7 @@ export function FloatingDrawingToolbar() {
     sync();
     window.addEventListener('resize', sync);
     return () => window.removeEventListener('resize', sync);
-  }, [drawing]);
+  }, [drawing, drawing?.type]);
 
   const positionPopover = useCallback((anchor: HTMLElement | null) => {
     if (!anchor || typeof window === 'undefined') return;
@@ -288,13 +289,15 @@ export function FloatingDrawingToolbar() {
 
       let left = anchor.left;
       if (left + pop.width > vw - 8) {
-        left = Math.max(8, vw - pop.width - 8);
+        left = vw - pop.width - 8;
       }
+      left = Math.max(8, left);
 
       let top = anchor.bottom + 6;
       if (top + pop.height > vh - 8) {
-        top = Math.max(8, anchor.top - pop.height - 6);
+        top = anchor.top - pop.height - 6;
       }
+      top = Math.max(44, top);
 
       setPopoverCoords({ top, left });
     };

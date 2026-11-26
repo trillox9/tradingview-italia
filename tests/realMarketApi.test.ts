@@ -12,10 +12,12 @@ import {
   getSnapshotQuote,
   getSymbolByTicker,
   getSymbolsByAssetClass,
+  mergeLatestBarIntoSeries,
   parseBinance24hrTickers,
   parseBinanceKlines,
   parseRealSnapshot,
   parseYahooChartResponse,
+  resolveRealCandlesSmart,
   setLoadedSnapshotForTest,
   snapshotEntryToCandles,
   snapshotEntryToQuote,
@@ -231,5 +233,128 @@ describe('Real Yahoo Market Snapshot (public/real-market-snapshot.json)', () => 
     expect(changed).not.toContain('AAPL');
     expect(feed.getQuote('AAPL')!.price).toBe(beforePrice);
     expect(feed.getQuote('AAPL')!.source).toBe('snapshot');
+  });
+});
+
+describe('Flash-Free Smart Real Candles Resolver & Abort Cancellation (realMarketApi.ts)', () => {
+  it('merges only the latest bar without replacing historical series', () => {
+    const day1 = Math.floor(Date.UTC(2026, 9, 10, 0, 0, 0) / 1000);
+    const day2 = Math.floor(Date.UTC(2026, 9, 11, 0, 0, 0) / 1000);
+    const day3 = Math.floor(Date.UTC(2026, 9, 12, 0, 0, 0) / 1000);
+
+    const existing = [
+      { time: day1, open: 100, high: 105, low: 98, close: 104, volume: 1000 },
+      { time: day2, open: 104, high: 108, low: 103, close: 106, volume: 1200 },
+    ];
+    // Incoming has slightly altered history on day1 (must be ignored!) + live tail update on day2 + new bar on day3
+    const incoming = [
+      { time: day1, open: 999, high: 999, low: 999, close: 999, volume: 999 },
+      { time: day2 + 3600, open: 104, high: 110, low: 102, close: 109, volume: 1500 },
+      { time: day3, open: 109, high: 112, low: 108, close: 111, volume: 900 },
+    ];
+
+    const merged = mergeLatestBarIntoSeries(existing, incoming, '1D');
+    expect(merged).toHaveLength(3);
+    // Historical bar 0 untouched
+    expect(merged[0]).toEqual(existing[0]);
+    // Day 2 tail patched in place preserving timestamp & expanding range
+    expect(merged[1].time).toBe(day2);
+    expect(merged[1].high).toBe(110);
+    expect(merged[1].low).toBe(102);
+    expect(merged[1].close).toBe(109);
+    expect(merged[1].volume).toBe(1500);
+    // Day 3 appended cleanly
+    expect(merged[2]).toEqual(incoming[2]);
+  });
+
+  it('resolves live Yahoo directly when fast, or falls back to snapshot with silent tail update when slow', async () => {
+    const aapl = getSymbolByTicker('AAPL')!;
+    const liveBars = [
+      { time: 1764000000, open: 240, high: 245, low: 239, close: 244, volume: 5000 },
+    ];
+    const snapBars = [
+      { time: 1764000000, open: 240, high: 242, low: 239, close: 241, volume: 4000 },
+    ];
+
+    // Fast live Yahoo -> returns 'yahoo' immediately without snapshot double-jump
+    const fast = await resolveRealCandlesSmart(aapl, '1D', {
+      bypassTestGuard: true,
+      liveTimeoutMs: 120,
+      fetchYahoo: async () => ({ candles: liveBars, quote: null }),
+      loadSnapshot: async () => null,
+      getSnapCandles: () => snapBars,
+    });
+    expect(fast?.source).toBe('yahoo');
+    expect(fast?.candles[0].close).toBe(244);
+
+    // Slow live Yahoo exceeding snappy budget -> returns real snapshot immediately & fires onLateYahooUpdate later
+    let resolveLate!: (v: { candles: typeof liveBars; quote: null }) => void;
+    const latePromise = new Promise<{ candles: typeof liveBars; quote: null }>((r) => {
+      resolveLate = r;
+    });
+    let lateReceived: typeof liveBars | null = null;
+
+    const snapped = await resolveRealCandlesSmart(aapl, '1D', {
+      bypassTestGuard: true,
+      liveTimeoutMs: 15,
+      fetchYahoo: () => latePromise,
+      loadSnapshot: async () => null,
+      getSnapCandles: () => snapBars,
+      getSnapQuote: () => null,
+      onLateYahooUpdate: (res) => {
+        lateReceived = res.candles;
+      },
+    });
+    expect(snapped?.source).toBe('snapshot');
+    expect(snapped?.candles[0].close).toBe(241);
+    expect(lateReceived).toBeNull();
+
+    // When slow live Yahoo later finishes, silent tail update callback fires
+    resolveLate({ candles: liveBars, quote: null });
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lateReceived).toEqual(liveBars);
+  });
+
+  it('cancels out-of-order slow fetches via AbortController during rapid symbol switching', async () => {
+    const btc = getSymbolByTicker('BTCUSDT')!;
+    const aapl = getSymbolByTicker('AAPL')!;
+    const ctrl1 = new AbortController();
+    const ctrl2 = new AbortController();
+
+    let resolveSlowBtc!: (v: { time: number; open: number; high: number; low: number; close: number; volume: number }[]) => void;
+    const slowBtc = new Promise<{ time: number; open: number; high: number; low: number; close: number; volume: number }[]>((r) => {
+      resolveSlowBtc = r;
+    });
+
+    const p1 = resolveRealCandlesSmart(btc, '15m', {
+      bypassTestGuard: true,
+      signal: ctrl1.signal,
+      fetchBinance: () => slowBtc,
+    });
+
+    // User switches rapidly to AAPL before BTC resolves -> abort BTC request
+    ctrl1.abort();
+
+    const aaplBars = [
+      { time: 1764000000, open: 230, high: 235, low: 229, close: 234, volume: 1000 },
+    ];
+    const p2 = resolveRealCandlesSmart(aapl, '1D', {
+      bypassTestGuard: true,
+      signal: ctrl2.signal,
+      liveTimeoutMs: 100,
+      fetchYahoo: async () => ({ candles: aaplBars, quote: null }),
+      loadSnapshot: async () => null,
+    });
+
+    // Now the stale BTC promise resolves out of order — must be discarded as null!
+    resolveSlowBtc([
+      { time: 1764000000, open: 60000, high: 61000, low: 59000, close: 60500, volume: 50 },
+    ]);
+
+    const [res1, res2] = await Promise.all([p1, p2]);
+    expect(res1).toBeNull();
+    expect(res2?.source).toBe('yahoo');
+    expect(res2?.candles[0].close).toBe(234);
   });
 });
