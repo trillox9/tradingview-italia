@@ -1,40 +1,61 @@
-import type {
-  AlertRule,
-  Candle,
-  ChartType,
-  DrawingObject,
-  DrawingPoint,
-  IndicatorSeries,
-  LineStyle,
-  PaperPosition,
-  ScreenPoint,
-  SymbolInfo,
-  Timeframe,
+import {
+  getDefaultChartSettings,
+  normalizeChartType,
+  type AlertRule,
+  type Candle,
+  type ChartDateFormat,
+  type ChartSettings,
+  type ChartTimezoneSetting,
+  type ChartType,
+  type CursorToolType,
+  type DrawingObject,
+  type DrawingPoint,
+  type IndicatorSeries,
+  type PaperOrder,
+  type PaperPosition,
+  type PriceScalePosition,
+  type ScreenPoint,
+  type SymbolInfo,
+  type Timeframe,
 } from '../../types';
 import { formatPrice, formatVolume } from '../../data';
+import type { HideMode, ScaleMode, ThemeMode } from '../../store';
 import {
-  calculateFibonacciLevels,
-  calculateMeasure,
-  calculateParallelChannel,
-  calculatePositionMetrics,
-  extendLineToBounds,
-} from '../../engine';
-import type { ScaleMode, ThemeMode } from '../../store';
+  applyLineDash,
+  drawRoundedRectPath,
+  renderAllDrawings,
+} from './drawingRenderer';
 
 export const PRICE_AXIS_WIDTH = 58;
 export const TIME_AXIS_HEIGHT = 28;
 export const COMPARE_COLORS = ['#FF9800', '#AB47BC', '#00BCD4', '#E91E63', '#8BC34A'];
 
-/** Dynamically size the right price axis so 6-8 decimal sub-cent coins never clip */
+const FONT_FAMILY =
+  '-apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif';
+
+/** Dynamically size the price axis so 6-8 decimal coins or larger scale fonts never clip */
 export function computePriceAxisWidth(
   precision: number,
   scaleMode: ScaleMode,
+  fontSize = 11,
 ): number {
-  if (scaleMode === 'percent') return 58;
-  if (precision >= 7) return 84;
-  if (precision >= 5) return 76;
-  if (precision >= 4) return 66;
-  return PRICE_AXIS_WIDTH;
+  const fontPad = Math.max(0, Math.round((fontSize - 11) * 4));
+  if (scaleMode === 'percent') return 58 + fontPad;
+  if (scaleMode === 'indexed100') return 64 + fontPad;
+  if (precision >= 7) return 86 + fontPad;
+  if (precision >= 5) return 76 + fontPad;
+  if (precision >= 4) return 66 + fontPad;
+  return PRICE_AXIS_WIDTH + fontPad;
+}
+
+export function resolveEffectivePrecision(
+  symbolPrecision: number,
+  chartSettings?: ChartSettings,
+): number {
+  const pref = chartSettings?.symbol.precision ?? 'default';
+  if (pref === 'default') return symbolPrecision;
+  const parsed = parseInt(pref, 10);
+  return Number.isFinite(parsed) ? parsed : symbolPrecision;
 }
 
 export interface ViewportState {
@@ -46,6 +67,9 @@ export interface ViewportState {
   yZoom: number;
   /** Vertical pan shift in normalized range units when !autoScale */
   yOffset: number;
+  /** Explicit scaled vertical min/max when manually zoomed or 2D-panned (!autoScale) */
+  manualMin?: number | null;
+  manualMax?: number | null;
 }
 
 export interface PaneRect {
@@ -61,10 +85,28 @@ export interface SubPaneLayout {
   max: number;
 }
 
+export interface PlusButtonHitRect {
+  x: number;
+  y: number;
+  radius: number;
+  price: number;
+}
+
+export interface ZoomBoxOverlay {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export interface ChartLayoutMetrics {
   width: number;
   height: number;
   priceAxisWidth: number;
+  priceAxisLeft: number;
+  priceScalePosition: PriceScalePosition;
+  plotLeft: number;
+  plotRight: number;
   plotWidth: number;
   mainRect: PaneRect;
   subPanes: SubPaneLayout[];
@@ -73,9 +115,13 @@ export interface ChartLayoutMetrics {
   rightIndex: number;
   barStepPx: number;
   scaleMode: ScaleMode;
+  invertScale: boolean;
+  precision: number;
   basePrice: number;
+  rawMainSpan: number;
   mainMin: number;
   mainMax: number;
+  plusButtonRect: PlusButtonHitRect | null;
 }
 
 export interface CompareSeriesData {
@@ -105,6 +151,9 @@ export interface RenderChartParams {
   viewport: ViewportState;
   scaleMode: ScaleMode;
   autoScale: boolean;
+  invertScale?: boolean;
+  lockPriceToBarRatio?: boolean;
+  priceScalePosition?: PriceScalePosition;
   showVolume: boolean;
   showGrid: boolean;
   countdownText: string | null;
@@ -114,10 +163,19 @@ export interface RenderChartParams {
   drawings: DrawingObject[];
   draftDrawing: DrawingObject | null;
   selectedDrawingId: string | null;
+  eraserHoveredId?: string | null;
   hideDrawings: boolean;
+  hideMode?: HideMode;
   positions: PaperPosition[];
+  orders?: PaperOrder[];
+  executions?: PaperOrder[];
   alerts: AlertRule[];
   crosshair: CrosshairState;
+  cursorMode?: CursorToolType;
+  bidPrice?: number;
+  askPrice?: number;
+  zoomBox?: ZoomBoxOverlay | null;
+  chartSettings?: ChartSettings;
 }
 
 export interface ChartPalette {
@@ -144,18 +202,18 @@ export function getChartPalette(theme: ThemeMode): ChartPalette {
   if (theme === 'dark') {
     return {
       bg: '#000000',
-      grid: 'rgba(255, 255, 255, 0.055)',
+      grid: 'rgba(255, 255, 255, 0.06)',
       axisBorder: '#2a2a2a',
       axisText: '#8c8c8c',
-      watermark: 'rgba(255, 255, 255, 0.045)',
+      watermark: 'rgba(255, 255, 255, 0.05)',
       up: '#089981',
       down: '#f23645',
       volUp: 'rgba(8, 153, 129, 0.36)',
       volDown: 'rgba(242, 54, 69, 0.36)',
       line: '#2962ff',
-      areaTop: 'rgba(41, 98, 255, 0.30)',
-      areaBottom: 'rgba(41, 98, 255, 0.01)',
-      crosshair: '#707070',
+      areaTop: 'rgba(41, 98, 255, 0.28)',
+      areaBottom: 'rgba(41, 98, 255, 0.02)',
+      crosshair: '#8c8c8c',
       pillBg: '#303030',
       pillText: '#ffffff',
       text: '#b8b8b8',
@@ -167,7 +225,7 @@ export function getChartPalette(theme: ThemeMode): ChartPalette {
     grid: '#f0f3fa',
     axisBorder: '#e2e5ec',
     axisText: '#707070',
-    watermark: 'rgba(0, 0, 0, 0.04)',
+    watermark: 'rgba(19, 23, 34, 0.05)',
     up: '#089981',
     down: '#f23645',
     volUp: 'rgba(8, 153, 129, 0.30)',
@@ -175,7 +233,7 @@ export function getChartPalette(theme: ThemeMode): ChartPalette {
     line: '#2962ff',
     areaTop: 'rgba(41, 98, 255, 0.24)',
     areaBottom: 'rgba(41, 98, 255, 0.01)',
-    crosshair: '#8c8c8c',
+    crosshair: '#787b86',
     pillBg: '#131313',
     pillText: '#ffffff',
     text: '#131313',
@@ -183,13 +241,46 @@ export function getChartPalette(theme: ThemeMode): ChartPalette {
   };
 }
 
-function setDash(ctx: CanvasRenderingContext2D, style?: LineStyle) {
-  if (style === 'dashed') ctx.setLineDash([5, 4]);
-  else if (style === 'dotted') ctx.setLineDash([2, 3]);
-  else ctx.setLineDash([]);
+/** Hit-test helpers honoring Left OR Right price scale position */
+export function isPointInPriceAxis(
+  x: number,
+  y: number,
+  layout: ChartLayoutMetrics,
+): boolean {
+  return (
+    x >= layout.priceAxisLeft &&
+    x <= layout.priceAxisLeft + layout.priceAxisWidth &&
+    y >= 0 &&
+    y <= layout.timeAxisTop
+  );
 }
 
-/** Transform raw price into scaled numeric domain (regular, log, or percent) */
+export function isPointInTimeAxis(
+  x: number,
+  y: number,
+  layout: ChartLayoutMetrics,
+): boolean {
+  return (
+    y > layout.timeAxisTop &&
+    x >= layout.plotLeft &&
+    x <= layout.plotRight
+  );
+}
+
+export function isPointInMainPlot(
+  x: number,
+  y: number,
+  layout: ChartLayoutMetrics,
+): boolean {
+  return (
+    x >= layout.plotLeft &&
+    x <= layout.plotRight &&
+    y >= layout.mainRect.top &&
+    y <= layout.mainRect.bottom
+  );
+}
+
+/** Transform raw price into scaled numeric domain (regular, log, percent, indexed100) */
 export function toScaledValue(
   price: number,
   mode: ScaleMode,
@@ -198,6 +289,10 @@ export function toScaledValue(
   if (mode === 'percent') {
     const base = basePrice > 0 ? basePrice : 1;
     return ((price - base) / base) * 100;
+  }
+  if (mode === 'indexed100') {
+    const base = basePrice > 0 ? basePrice : 1;
+    return (price / base) * 100;
   }
   if (mode === 'log') {
     return Math.log(Math.max(price, 1e-12));
@@ -214,10 +309,25 @@ export function fromScaledValue(
     const base = basePrice > 0 ? basePrice : 1;
     return base * (1 + scaled / 100);
   }
+  if (mode === 'indexed100') {
+    const base = basePrice > 0 ? basePrice : 1;
+    return base * (scaled / 100);
+  }
   if (mode === 'log') {
     return Math.exp(scaled);
   }
   return scaled;
+}
+
+export function scaledToY(
+  scaled: number,
+  layout: ChartLayoutMetrics,
+): number {
+  const span = Math.max(1e-12, layout.mainMax - layout.mainMin);
+  const ratio = (scaled - layout.mainMin) / span;
+  return layout.invertScale
+    ? layout.mainRect.top + ratio * layout.mainRect.height
+    : layout.mainRect.bottom - ratio * layout.mainRect.height;
 }
 
 export function priceToY(
@@ -225,36 +335,43 @@ export function priceToY(
   layout: ChartLayoutMetrics,
 ): number {
   const s = toScaledValue(price, layout.scaleMode, layout.basePrice);
-  const span = Math.max(1e-12, layout.mainMax - layout.mainMin);
-  const ratio = (s - layout.mainMin) / span;
-  return layout.mainRect.bottom - ratio * layout.mainRect.height;
+  return scaledToY(s, layout);
 }
 
 export function yToPrice(y: number, layout: ChartLayoutMetrics): number {
-  const ratio = (layout.mainRect.bottom - y) / Math.max(1, layout.mainRect.height);
+  const h = Math.max(1, layout.mainRect.height);
+  const ratio = layout.invertScale
+    ? (y - layout.mainRect.top) / h
+    : (layout.mainRect.bottom - y) / h;
   const scaled = layout.mainMin + ratio * (layout.mainMax - layout.mainMin);
   return fromScaledValue(scaled, layout.scaleMode, layout.basePrice);
 }
 
 export function indexToX(index: number, layout: ChartLayoutMetrics): number {
-  return (index - layout.leftIndex + 0.5) * layout.barStepPx;
+  return layout.plotLeft + (index - layout.leftIndex + 0.5) * layout.barStepPx;
 }
 
 export function xToIndex(x: number, layout: ChartLayoutMetrics): number {
-  return layout.leftIndex + x / Math.max(1e-6, layout.barStepPx) - 0.5;
+  return (
+    layout.leftIndex +
+    (x - layout.plotLeft) / Math.max(1e-6, layout.barStepPx) -
+    0.5
+  );
 }
 
 export function timeToIndex(time: number, candles: readonly Candle[]): number {
   if (candles.length === 0) return 0;
   if (candles.length === 1) return 0;
-  const step = Math.max(1, candles[candles.length - 1].time - candles[candles.length - 2].time);
+  const step = Math.max(
+    1,
+    candles[candles.length - 1].time - candles[candles.length - 2].time,
+  );
   if (time <= candles[0].time) {
     return (time - candles[0].time) / step;
   }
   if (time >= candles[candles.length - 1].time) {
     return candles.length - 1 + (time - candles[candles.length - 1].time) / step;
   }
-  // Binary search for exact / interpolated bar index
   let lo = 0;
   let hi = candles.length - 1;
   while (lo <= hi) {
@@ -274,11 +391,16 @@ export function timeToIndex(time: number, candles: readonly Candle[]): number {
 export function indexToTime(index: number, candles: readonly Candle[]): number {
   if (candles.length === 0) return Math.floor(Date.now() / 1000);
   if (candles.length === 1) return candles[0].time;
-  const step = Math.max(1, candles[candles.length - 1].time - candles[candles.length - 2].time);
+  const step = Math.max(
+    1,
+    candles[candles.length - 1].time - candles[candles.length - 2].time,
+  );
   const clamped = Math.round(index);
   if (clamped < 0) return candles[0].time + clamped * step;
   if (clamped >= candles.length) {
-    return candles[candles.length - 1].time + (clamped - (candles.length - 1)) * step;
+    return (
+      candles[candles.length - 1].time + (clamped - (candles.length - 1)) * step
+    );
   }
   return candles[clamped].time;
 }
@@ -291,6 +413,13 @@ export function computeChartLayout(params: {
   viewport: ViewportState;
   scaleMode: ScaleMode;
   autoScale: boolean;
+  invertScale?: boolean;
+  lockPriceToBarRatio?: boolean;
+  priceScalePosition?: PriceScalePosition;
+  scalePriceChartOnly?: boolean;
+  topMarginPct?: number;
+  bottomMarginPct?: number;
+  scaleFontSize?: number;
   overlaySeries: IndicatorSeries[];
   separateSeries: IndicatorSeries[];
   compareSeries: CompareSeriesData[];
@@ -302,16 +431,33 @@ export function computeChartLayout(params: {
     candles,
     viewport,
     autoScale,
+    invertScale = false,
+    lockPriceToBarRatio = false,
+    priceScalePosition = 'right',
+    scalePriceChartOnly = false,
+    topMarginPct = 10,
+    bottomMarginPct = 12,
+    scaleFontSize = 11,
     overlaySeries,
     separateSeries,
     compareSeries,
   } = params;
 
   const effectiveScale: ScaleMode =
-    compareSeries.length > 0 ? 'percent' : params.scaleMode;
+    compareSeries.length > 0 && params.scaleMode !== 'indexed100'
+      ? 'percent'
+      : params.scaleMode;
 
-  const priceAxisWidth = computePriceAxisWidth(precision, effectiveScale);
+  const priceAxisWidth = computePriceAxisWidth(
+    precision,
+    effectiveScale,
+    scaleFontSize,
+  );
   const plotWidth = Math.max(60, width - priceAxisWidth);
+  const plotLeft = priceScalePosition === 'left' ? priceAxisWidth : 0;
+  const plotRight = plotLeft + plotWidth;
+  const priceAxisLeft = priceScalePosition === 'left' ? 0 : plotRight;
+
   const usableHeight = Math.max(100, height - TIME_AXIS_HEIGHT);
   const subCount = separateSeries.length;
   const maxSubTotal = Math.floor(usableHeight * 0.46);
@@ -328,11 +474,10 @@ export function computeChartLayout(params: {
     bottom: mainH,
   };
 
-  const visibleBars = Math.max(12, Math.min(400, viewport.visibleBars));
-  // Guard against an off-screen rightIndex after async real-candle replacement
+  const visibleBars = Math.max(8, Math.min(480, viewport.visibleBars));
   const maxAllowedRight =
     candles.length > 0
-      ? candles.length + Math.max(8, visibleBars * 0.75)
+      ? candles.length + Math.max(10, visibleBars * 0.85)
       : visibleBars;
   const rightIndex = Math.max(4, Math.min(maxAllowedRight, viewport.rightIndex));
   const leftIndex = rightIndex - visibleBars;
@@ -340,10 +485,9 @@ export function computeChartLayout(params: {
 
   const startIdx = Math.max(0, Math.floor(leftIndex));
   const endIdx = Math.min(candles.length - 1, Math.ceil(rightIndex));
-  const basePrice =
-    candles[startIdx]?.close ?? candles[0]?.close ?? 1;
+  const basePrice = candles[startIdx]?.close ?? candles[0]?.close ?? 1;
 
-  // Compute min/max in scaled units across visible bars + overlay series + compare series
+  // Compute min/max in scaled units across visible bars (+ overlays unless scalePriceChartOnly)
   let sMin = Infinity;
   let sMax = -Infinity;
 
@@ -356,19 +500,24 @@ export function computeChartLayout(params: {
     if (hi > sMax) sMax = hi;
   }
 
-  for (const ind of overlaySeries) {
-    for (const plot of ind.plots) {
-      for (let i = startIdx; i <= endIdx; i++) {
-        const pt = plot.data[i];
-        if (!pt || pt.value == null || !Number.isFinite(pt.value)) continue;
-        const v = toScaledValue(pt.value, effectiveScale, basePrice);
-        if (v < sMin) sMin = v;
-        if (v > sMax) sMax = v;
+  if (!scalePriceChartOnly) {
+    for (const ind of overlaySeries) {
+      for (const plot of ind.plots) {
+        for (let i = startIdx; i <= endIdx; i++) {
+          const pt = plot.data[i];
+          if (!pt || pt.value == null || !Number.isFinite(pt.value)) continue;
+          const v = toScaledValue(pt.value, effectiveScale, basePrice);
+          if (v < sMin) sMin = v;
+          if (v > sMax) sMax = v;
+        }
       }
     }
   }
 
-  if (compareSeries.length > 0 && effectiveScale === 'percent') {
+  if (
+    compareSeries.length > 0 &&
+    (effectiveScale === 'percent' || effectiveScale === 'indexed100')
+  ) {
     for (const comp of compareSeries) {
       const firstT = candles[startIdx]?.time;
       const compBase =
@@ -380,9 +529,12 @@ export function computeChartLayout(params: {
         if (t == null) continue;
         const v = comp.byTime.get(t);
         if (v == null || !Number.isFinite(v)) continue;
-        const pct = ((v - compBase) / Math.max(1e-12, compBase)) * 100;
-        if (pct < sMin) sMin = pct;
-        if (pct > sMax) sMax = pct;
+        const scaledComp =
+          effectiveScale === 'indexed100'
+            ? (v / Math.max(1e-12, compBase)) * 100
+            : ((v - compBase) / Math.max(1e-12, compBase)) * 100;
+        if (scaledComp < sMin) sMin = scaledComp;
+        if (scaledComp > sMax) sMax = scaledComp;
       }
     }
   }
@@ -397,16 +549,40 @@ export function computeChartLayout(params: {
     sMax += pad;
   }
 
-  // Padding: leave room at top for legend (12%) and bottom for volume (16%)
+  // Honor user canvas top/bottom margin %
+  const topFrac = Math.max(0.02, Math.min(0.4, topMarginPct / 100));
+  const botFrac = Math.max(0.02, Math.min(0.4, bottomMarginPct / 100));
   const rawSpan = sMax - sMin;
-  let mainMin = sMin - rawSpan * 0.16;
-  let mainMax = sMax + rawSpan * 0.12;
+  let mainMin = sMin - rawSpan * botFrac;
+  let mainMax = sMax + rawSpan * topFrac;
+  const basePaddedSpan = Math.max(1e-12, mainMax - mainMin);
 
-  if (!autoScale) {
-    const mid = (mainMin + mainMax) / 2 + viewport.yOffset * rawSpan;
-    const half = ((mainMax - mainMin) / 2) / Math.max(0.2, Math.min(8, viewport.yZoom));
-    mainMin = mid - half;
-    mainMax = mid + half;
+  if (lockPriceToBarRatio) {
+    // Lock vertical span proportionally to visibleBars (reference 120 bars)
+    const mid = (mainMin + mainMax) / 2 + viewport.yOffset * basePaddedSpan;
+    const lockedHalf =
+      (basePaddedSpan / 2) *
+      (visibleBars / 120) /
+      Math.max(0.15, Math.min(12, viewport.yZoom));
+    mainMin = mid - lockedHalf;
+    mainMax = mid + lockedHalf;
+  } else if (!autoScale) {
+    if (
+      viewport.manualMin != null &&
+      viewport.manualMax != null &&
+      Number.isFinite(viewport.manualMin) &&
+      Number.isFinite(viewport.manualMax) &&
+      viewport.manualMax > viewport.manualMin
+    ) {
+      mainMin = viewport.manualMin;
+      mainMax = viewport.manualMax;
+    } else {
+      const mid = (mainMin + mainMax) / 2 + viewport.yOffset * basePaddedSpan;
+      const half =
+        basePaddedSpan / 2 / Math.max(0.15, Math.min(12, viewport.yZoom));
+      mainMin = mid - half;
+      mainMax = mid + half;
+    }
   }
 
   // Compute sub-pane rects and ranges
@@ -458,6 +634,10 @@ export function computeChartLayout(params: {
     width,
     height,
     priceAxisWidth,
+    priceAxisLeft,
+    priceScalePosition,
+    plotLeft,
+    plotRight,
     plotWidth,
     mainRect,
     subPanes,
@@ -466,9 +646,13 @@ export function computeChartLayout(params: {
     rightIndex,
     barStepPx,
     scaleMode: effectiveScale,
+    invertScale,
+    precision,
     basePrice,
+    rawMainSpan: basePaddedSpan,
     mainMin,
     mainMax,
+    plusButtonRect: null,
   };
 }
 
@@ -486,38 +670,109 @@ function niceTicks(min: number, max: number, approxCount: number): number[] {
   const step = nice * mag;
   const first = Math.ceil(min / step) * step;
   const out: number[] = [];
-  for (let v = first; v <= max + step * 0.001 && out.length < 30; v += step) {
+  for (let v = first; v <= max + step * 0.001 && out.length < 32; v += step) {
     out.push(v);
   }
   return out;
 }
 
-function formatAxisTime(sec: number, timeframe: Timeframe, full = false): string {
-  const d = new Date(sec * 1000);
-  const months = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mon = months[d.getMonth()];
-  const yy = String(d.getFullYear()).slice(-2);
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
+const MONTHS_IT = [
+  'Gen',
+  'Feb',
+  'Mar',
+  'Apr',
+  'Mag',
+  'Giu',
+  'Lug',
+  'Ago',
+  'Set',
+  'Ott',
+  'Nov',
+  'Dic',
+];
+
+const tzFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function getTzParts(sec: number, tz: ChartTimezoneSetting) {
+  let fmt = tzFormatterCache.get(tz);
+  if (!fmt) {
+    try {
+      fmt = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+      tzFormatterCache.set(tz, fmt);
+    } catch {
+      const d = new Date(sec * 1000);
+      return {
+        yyyy: String(d.getFullYear()),
+        yy: String(d.getFullYear()).slice(-2),
+        mmNum: String(d.getMonth() + 1).padStart(2, '0'),
+        mon: MONTHS_IT[d.getMonth()],
+        dd: String(d.getDate()).padStart(2, '0'),
+        hh: String(d.getHours()).padStart(2, '0'),
+        min: String(d.getMinutes()).padStart(2, '0'),
+      };
+    }
+  }
+  const parts = fmt.formatToParts(new Date(sec * 1000));
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = p.value;
+  }
+  const monthIdx = Math.max(0, Math.min(11, parseInt(map.month ?? '1', 10) - 1));
+  const yyyy = map.year ?? '2026';
+  const hh = map.hour === '24' ? '00' : (map.hour ?? '00');
+  return {
+    yyyy,
+    yy: yyyy.slice(-2),
+    mmNum: map.month ?? '01',
+    mon: MONTHS_IT[monthIdx],
+    dd: map.day ?? '01',
+    hh,
+    min: map.minute ?? '00',
+  };
+}
+
+function formatAxisTime(
+  sec: number,
+  timeframe: Timeframe,
+  full = false,
+  dateFormat: ChartDateFormat = 'DD MMM',
+  tz: ChartTimezoneSetting = 'Europe/Rome',
+): string {
+  const p = getTzParts(sec, tz);
+  const dateStr =
+    dateFormat === 'YYYY-MM-DD'
+      ? `${p.yyyy}-${p.mmNum}-${p.dd}`
+      : dateFormat === 'DD/MM/YYYY'
+        ? `${p.dd}/${p.mmNum}/${p.yyyy}`
+        : `${p.dd} ${p.mon} '${p.yy}`;
 
   if (full) {
     if (timeframe === '1D' || timeframe === '1W' || timeframe === '1M') {
-      return `${dd} ${mon} '${yy}`;
+      return dateStr;
     }
-    return `${dd} ${mon} '${yy} ${hh}:${mm}`;
+    return `${dateStr} ${p.hh}:${p.min}`;
   }
 
   if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m') {
-    return `${hh}:${mm}`;
+    return `${p.hh}:${p.min}`;
   }
   if (timeframe === '1H' || timeframe === '4H') {
-    return d.getHours() === 0 ? `${dd} ${mon}` : `${dd} ${hh}:${mm}`;
+    return p.hh === '00' ? `${p.dd} ${p.mon}` : `${p.dd} ${p.hh}:${p.min}`;
   }
   if (timeframe === '1M') {
-    return `${mon} '${yy}`;
+    return `${p.mon} '${p.yy}`;
   }
-  return `${dd} ${mon}`;
+  if (dateFormat === 'YYYY-MM-DD') return `${p.mmNum}-${p.dd}`;
+  if (dateFormat === 'DD/MM/YYYY') return `${p.dd}/${p.mmNum}`;
+  return `${p.dd} ${p.mon}`;
 }
 
 function formatAxisPrice(
@@ -530,36 +785,55 @@ function formatAxisPrice(
     const sign = scaledVal > 0 ? '+' : '';
     return `${sign}${scaledVal.toFixed(1)}%`;
   }
+  if (mode === 'indexed100') {
+    return scaledVal.toFixed(2);
+  }
   const actual = fromScaledValue(scaledVal, mode, basePrice);
   return formatPrice(actual, precision);
 }
 
-function formatDurationIT(seconds: number): string {
-  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))}m`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
-  const days = Math.round(seconds / 86400);
-  return `${days}g`;
+interface OccupiedInterval {
+  top: number;
+  bottom: number;
 }
 
-function drawRoundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+function resolveNonOverlappingY(
+  desiredY: number,
+  badgeHeight: number,
+  minY: number,
+  maxY: number,
+  occupied: OccupiedInterval[],
+  enabled: boolean,
+): number {
+  const half = badgeHeight / 2;
+  let y = Math.max(minY + half, Math.min(maxY - half, desiredY));
+  if (!enabled) {
+    occupied.push({ top: y - half, bottom: y + half });
+    return y;
+  }
+
+  const collides = (cy: number) =>
+    occupied.some(
+      (iv) => cy + half + 1 > iv.top && cy - half - 1 < iv.bottom,
+    );
+
+  if (collides(y)) {
+    const step = badgeHeight + 2;
+    for (let k = 1; k <= 8; k++) {
+      const up = y - k * step;
+      if (up >= minY + half && !collides(up)) {
+        y = up;
+        break;
+      }
+      const down = y + k * step;
+      if (down <= maxY - half && !collides(down)) {
+        y = down;
+        break;
+      }
+    }
+  }
+  occupied.push({ top: y - half, bottom: y + half });
+  return y;
 }
 
 export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
@@ -576,6 +850,9 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     viewport,
     scaleMode,
     autoScale,
+    invertScale: invertProp,
+    lockPriceToBarRatio: lockProp,
+    priceScalePosition: posProp,
     showVolume,
     showGrid,
     countdownText,
@@ -585,28 +862,71 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     drawings,
     draftDrawing,
     selectedDrawingId,
+    eraserHoveredId = null,
     hideDrawings,
+    hideMode = 'none',
     positions,
+    orders = [],
+    executions = [],
     alerts,
     crosshair,
+    cursorMode = 'crosshair',
+    bidPrice,
+    askPrice,
+    zoomBox = null,
   } = params;
 
+  const settings = params.chartSettings ?? getDefaultChartSettings(theme);
+  const symCfg = settings.symbol;
+  const scalesCfg = settings.scales;
+  const canvasCfg = settings.canvas;
+  const tradingCfg = settings.trading;
+  const alertsCfg = settings.alerts;
+
   const pal = getChartPalette(theme);
+  const effectivePrecision = resolveEffectivePrecision(symbol.precision, settings);
+  const invertScale = invertProp ?? scalesCfg.invertScale;
+  const lockPriceToBarRatio = lockProp ?? scalesCfg.lockPriceToBarRatio;
+  const priceScalePosition = posProp ?? scalesCfg.position;
+  const canonicalType = normalizeChartType(chartType);
+
+  const hideIndicators = hideMode === 'indicators' || hideMode === 'all';
+  const hidePositions = hideMode === 'positions' || hideMode === 'all';
+  const hideAllDrawings =
+    hideDrawings || hideMode === 'drawings' || hideMode === 'all';
+
+  const visibleOverlays = hideIndicators ? [] : overlaySeries;
+  const visibleSeparates = hideIndicators ? [] : separateSeries;
+
   const layout = computeChartLayout({
     width,
     height,
-    precision: symbol.precision,
+    precision: effectivePrecision,
     candles,
     viewport,
     scaleMode,
     autoScale,
-    overlaySeries,
-    separateSeries,
+    invertScale,
+    lockPriceToBarRatio,
+    priceScalePosition,
+    scalePriceChartOnly: scalesCfg.scalePriceChartOnly,
+    topMarginPct: canvasCfg.topMarginPct,
+    bottomMarginPct: Math.max(canvasCfg.bottomMarginPct, showVolume ? 12 : 4),
+    scaleFontSize: canvasCfg.scaleFontSize,
+    overlaySeries: visibleOverlays,
+    separateSeries: visibleSeparates,
     compareSeries,
   });
 
-  // Clear entire canvas
-  ctx.fillStyle = pal.bg;
+  // ======================== 0. CANVAS BACKGROUND ========================
+  if (canvasCfg.bgType === 'gradient') {
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, canvasCfg.bgColor);
+    grad.addColorStop(1, canvasCfg.bgGradientEnd);
+    ctx.fillStyle = grad;
+  } else {
+    ctx.fillStyle = canvasCfg.bgColor || pal.bg;
+  }
   ctx.fillRect(0, 0, width, height);
 
   const startIdx = Math.max(0, Math.floor(layout.leftIndex) - 1);
@@ -619,35 +939,52 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     Math.max(4, Math.floor(layout.mainRect.height / 58)),
   );
 
-  // Vertical time tick stride (~100px spacing)
   const xStepBars = Math.max(1, Math.round(105 / Math.max(1, layout.barStepPx)));
   const xTickIndices: number[] = [];
-  const firstTick = Math.max(0, Math.ceil(layout.leftIndex / xStepBars) * xStepBars);
-  for (let i = firstTick; i <= Math.min(candles.length - 1, Math.ceil(layout.rightIndex)); i += xStepBars) {
+  const firstTick = Math.max(
+    0,
+    Math.ceil(layout.leftIndex / xStepBars) * xStepBars,
+  );
+  for (
+    let i = firstTick;
+    i <= Math.min(candles.length - 1, Math.ceil(layout.rightIndex));
+    i += xStepBars
+  ) {
     xTickIndices.push(i);
   }
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, layout.mainRect.top, layout.plotWidth, layout.mainRect.height);
+  ctx.rect(
+    layout.plotLeft,
+    layout.mainRect.top,
+    layout.plotWidth,
+    layout.mainRect.height,
+  );
   ctx.clip();
 
-  if (showGrid) {
-    ctx.strokeStyle = pal.grid;
+  const drawHorzGrid =
+    showGrid && (canvasCfg.gridMode === 'both' || canvasCfg.gridMode === 'horz');
+  const drawVertGrid =
+    showGrid && (canvasCfg.gridMode === 'both' || canvasCfg.gridMode === 'vert');
+
+  if (drawHorzGrid) {
+    ctx.strokeStyle = canvasCfg.horzGridColor || pal.grid;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
     for (const tv of mainTicks) {
-      const y =
-        Math.round(
-          layout.mainRect.bottom -
-            ((tv - layout.mainMin) / Math.max(1e-12, layout.mainMax - layout.mainMin)) *
-              layout.mainRect.height,
-        ) + 0.5;
+      const y = Math.round(scaledToY(tv, layout)) + 0.5;
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(layout.plotWidth, y);
+      ctx.moveTo(layout.plotLeft, y);
+      ctx.lineTo(layout.plotRight, y);
       ctx.stroke();
     }
+  }
+
+  if (drawVertGrid) {
+    ctx.strokeStyle = canvasCfg.vertGridColor || pal.grid;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
     for (const idx of xTickIndices) {
       const x = Math.round(indexToX(idx, layout)) + 0.5;
       ctx.beginPath();
@@ -657,18 +994,22 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     }
   }
 
-  // Subtle Watermark
-  ctx.save();
-  ctx.fillStyle = pal.watermark;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `700 ${Math.min(54, Math.max(24, Math.floor(layout.plotWidth / 15)))}px -apple-system, BlinkMacSystemFont, "Trebuchet MS", sans-serif`;
-  ctx.fillText(
-    `${symbol.ticker} · ${timeframe}`,
-    layout.plotWidth / 2,
-    layout.mainRect.top + layout.mainRect.height * 0.5,
-  );
-  ctx.restore();
+  // Watermark
+  if (canvasCfg.showWatermark) {
+    ctx.save();
+    ctx.fillStyle = canvasCfg.watermarkColor || pal.watermark;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const wmFontSize = Math.min(54, Math.max(22, Math.floor(layout.plotWidth / 15)));
+    ctx.font = `700 ${wmFontSize}px ${FONT_FAMILY}`;
+    const wmText = canvasCfg.watermarkText.trim() || `${symbol.ticker} · ${timeframe}`;
+    ctx.fillText(
+      wmText,
+      layout.plotLeft + layout.plotWidth / 2,
+      layout.mainRect.top + layout.mainRect.height * 0.5,
+    );
+    ctx.restore();
+  }
 
   // ======================== 2. VOLUME HISTOGRAM (LOWER 18%) ========================
   if (showVolume && candles.length > 0) {
@@ -684,15 +1025,18 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         if (!c) continue;
         const x = indexToX(i, layout);
         const h = (c.volume / maxVol) * volAreaH;
-        ctx.fillStyle = c.close >= c.open ? pal.volUp : pal.volDown;
+        const prevClose = candles[i - 1]?.close ?? c.open;
+        const isUp = symCfg.colorBarsBasedOnPrevClose
+          ? c.close >= prevClose
+          : c.close >= c.open;
+        ctx.fillStyle = isUp ? pal.volUp : pal.volDown;
         ctx.fillRect(x - barW / 2, layout.mainRect.bottom - h, barW, h);
       }
     }
   }
 
   // ======================== 3. OVERLAY INDICATOR BANDS & HLINES ========================
-  for (const ind of overlaySeries) {
-    // Shaded bands (Bollinger / Ichimoku Kumo)
+  for (const ind of visibleOverlays) {
     if (ind.bands) {
       for (const band of ind.bands) {
         const upper = ind.plots.find((p) => p.key === band.upperKey);
@@ -720,7 +1064,6 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
       }
     }
 
-    // Horizontal levels (Pivot Points / Pine hlines)
     if (ind.hlines) {
       for (const hl of ind.hlines) {
         const y = Math.round(priceToY(hl.value, layout)) + 0.5;
@@ -728,75 +1071,137 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         ctx.save();
         ctx.strokeStyle = hl.color;
         ctx.lineWidth = 1;
-        setDash(ctx, hl.lineStyle ?? 'dashed');
+        applyLineDash(ctx, hl.lineStyle ?? 'dashed');
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(layout.plotWidth, y);
+        ctx.moveTo(layout.plotLeft, y);
+        ctx.lineTo(layout.plotRight, y);
         ctx.stroke();
         if (hl.label) {
           ctx.fillStyle = hl.color;
-          ctx.font = '600 10px -apple-system, sans-serif';
+          ctx.font = `600 10px ${FONT_FAMILY}`;
           ctx.textAlign = 'right';
           ctx.textBaseline = 'bottom';
-          ctx.fillText(hl.label, layout.plotWidth - 6, y - 2);
+          ctx.fillText(hl.label, layout.plotRight - 6, y - 2);
         }
         ctx.restore();
       }
     }
   }
 
-  // ======================== 4. PRICE SERIES (ALL 7 CHART TYPES) ========================
+  // ======================== 4. PRICE SERIES (ALL 13 CHART STYLES) ========================
+  const upBody = symCfg.candleUpColor || pal.up;
+  const downBody = symCfg.candleDownColor || pal.down;
+  const upBorder = symCfg.candleBorderUpColor || upBody;
+  const downBorder = symCfg.candleBorderDownColor || downBody;
+  const upWick = symCfg.candleWickUpColor || upBody;
+  const downWick = symCfg.candleWickDownColor || downBody;
+  const seriesLineColor = symCfg.lineColor || pal.line;
+  const seriesLineW = Math.max(1, symCfg.lineWidth || 2);
+
   if (candles.length > 0) {
     const bodyW = Math.max(1.5, Math.min(22, layout.barStepPx * 0.72));
 
-    if (chartType === 'candles' || chartType === 'hollow' || chartType === 'heikinAshi') {
+    if (
+      canonicalType === 'candles' ||
+      canonicalType === 'hollow_candles' ||
+      canonicalType === 'volume_candles' ||
+      canonicalType === 'heikin_ashi'
+    ) {
+      let maxVisVol = 0;
+      if (canonicalType === 'volume_candles') {
+        for (let i = startIdx; i <= endIdx; i++) {
+          if (candles[i] && candles[i].volume > maxVisVol) maxVisVol = candles[i].volume;
+        }
+      }
+
       for (let i = startIdx; i <= endIdx; i++) {
         const c = candles[i];
         if (!c) continue;
+        const prevC = candles[i - 1];
         const x = indexToX(i, layout);
         const yO = priceToY(c.open, layout);
         const yC = priceToY(c.close, layout);
         const yH = priceToY(c.high, layout);
         const yL = priceToY(c.low, layout);
-        const isUp = c.close >= c.open;
-        const color = isUp ? pal.up : pal.down;
 
-        const wickX = Math.round(x) + 0.5;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(wickX, yH);
-        ctx.lineTo(wickX, yL);
-        ctx.stroke();
+        const isUpOpenClose = c.close >= c.open;
+        const isUpPrevClose = prevC ? c.close >= prevC.close : isUpOpenClose;
+        const colorIsUp =
+          canonicalType === 'hollow_candles'
+            ? isUpPrevClose
+            : symCfg.colorBarsBasedOnPrevClose
+              ? isUpPrevClose
+              : isUpOpenClose;
+
+        const w =
+          canonicalType === 'volume_candles' && maxVisVol > 0
+            ? Math.max(
+                2,
+                Math.min(
+                  layout.barStepPx * 0.94,
+                  bodyW * (0.28 + 0.96 * Math.sqrt(c.volume / maxVisVol)),
+                ),
+              )
+            : bodyW;
+
+        if (symCfg.showWicks) {
+          const wickX = Math.round(x) + 0.5;
+          ctx.strokeStyle = colorIsUp ? upWick : downWick;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(wickX, yH);
+          ctx.lineTo(wickX, yL);
+          ctx.stroke();
+        }
 
         const top = Math.min(yO, yC);
         const h = Math.max(1, Math.abs(yC - yO));
-        const bx = x - bodyW / 2;
-        if (chartType === 'hollow' && isUp) {
-          ctx.fillStyle = pal.bg;
-          ctx.fillRect(bx, top, bodyW, h);
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 1.25;
-          ctx.strokeRect(bx + 0.5, top + 0.5, Math.max(1, bodyW - 1), Math.max(1, h - 1));
+        const bx = x - w / 2;
+
+        if (canonicalType === 'hollow_candles' && isUpOpenClose) {
+          ctx.fillStyle = canvasCfg.bgColor || pal.bg;
+          ctx.fillRect(bx, top, w, h);
+          ctx.strokeStyle = colorIsUp ? upBorder : downBorder;
+          ctx.lineWidth = 1.3;
+          ctx.strokeRect(
+            bx + 0.5,
+            top + 0.5,
+            Math.max(1, w - 1),
+            Math.max(1, h - 1),
+          );
         } else {
-          ctx.fillStyle = color;
-          ctx.fillRect(bx, top, bodyW, h);
+          ctx.fillStyle = colorIsUp ? upBody : downBody;
+          ctx.fillRect(bx, top, w, h);
+          if (symCfg.showBorders && w >= 3) {
+            ctx.strokeStyle = colorIsUp ? upBorder : downBorder;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+              bx + 0.5,
+              top + 0.5,
+              Math.max(1, w - 1),
+              Math.max(1, h - 1),
+            );
+          }
         }
       }
-    } else if (chartType === 'bars') {
+    } else if (canonicalType === 'bars') {
       const tickW = Math.max(2, bodyW * 0.5);
       ctx.lineWidth = 1.4;
       ctx.setLineDash([]);
       for (let i = startIdx; i <= endIdx; i++) {
         const c = candles[i];
         if (!c) continue;
+        const prevC = candles[i - 1];
         const x = Math.round(indexToX(i, layout)) + 0.5;
         const yO = priceToY(c.open, layout);
         const yC = priceToY(c.close, layout);
         const yH = priceToY(c.high, layout);
         const yL = priceToY(c.low, layout);
-        ctx.strokeStyle = c.close >= c.open ? pal.up : pal.down;
+        const isUp = symCfg.colorBarsBasedOnPrevClose
+          ? c.close >= (prevC?.close ?? c.open)
+          : c.close >= c.open;
+        ctx.strokeStyle = isUp ? upBody : downBody;
         ctx.beginPath();
         ctx.moveTo(x, yH);
         ctx.lineTo(x, yL);
@@ -806,7 +1211,11 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         ctx.lineTo(x + tickW, yC);
         ctx.stroke();
       }
-    } else if (chartType === 'line' || chartType === 'area') {
+    } else if (
+      canonicalType === 'line' ||
+      canonicalType === 'line_markers' ||
+      canonicalType === 'area'
+    ) {
       const pts: ScreenPoint[] = [];
       for (let i = startIdx; i <= endIdx; i++) {
         const c = candles[i];
@@ -814,10 +1223,15 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         pts.push({ x: indexToX(i, layout), y: priceToY(c.close, layout) });
       }
       if (pts.length >= 2) {
-        if (chartType === 'area') {
-          const grad = ctx.createLinearGradient(0, layout.mainRect.top, 0, layout.mainRect.bottom);
-          grad.addColorStop(0, pal.areaTop);
-          grad.addColorStop(1, pal.areaBottom);
+        if (canonicalType === 'area') {
+          const grad = ctx.createLinearGradient(
+            0,
+            layout.mainRect.top,
+            0,
+            layout.mainRect.bottom,
+          );
+          grad.addColorStop(0, symCfg.areaTopColor || pal.areaTop);
+          grad.addColorStop(1, symCfg.areaBottomColor || pal.areaBottom);
           ctx.fillStyle = grad;
           ctx.beginPath();
           ctx.moveTo(pts[0].x, layout.mainRect.bottom);
@@ -826,15 +1240,103 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
           ctx.closePath();
           ctx.fill();
         }
-        ctx.strokeStyle = pal.line;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = seriesLineColor;
+        ctx.lineWidth = seriesLineW;
         ctx.setLineDash([]);
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
         ctx.stroke();
+
+        if (canonicalType === 'line_markers') {
+          const r = Math.max(2.4, Math.min(4.5, seriesLineW + 1.2));
+          for (const p of pts) {
+            ctx.fillStyle = canvasCfg.bgColor || pal.bg;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r + 1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = seriesLineColor;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
-    } else if (chartType === 'baseline') {
+    } else if (canonicalType === 'step_line') {
+      const pts: ScreenPoint[] = [];
+      for (let i = startIdx; i <= endIdx; i++) {
+        const c = candles[i];
+        if (!c) continue;
+        pts.push({ x: indexToX(i, layout), y: priceToY(c.close, layout) });
+      }
+      if (pts.length >= 2) {
+        ctx.strokeStyle = seriesLineColor;
+        ctx.lineWidth = seriesLineW;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let k = 1; k < pts.length; k++) {
+          // Horizontal to next bar's X, then vertical step to next bar's Y
+          ctx.lineTo(pts[k].x, pts[k - 1].y);
+          ctx.lineTo(pts[k].x, pts[k].y);
+        }
+        ctx.stroke();
+      }
+    } else if (canonicalType === 'hlc_area') {
+      const highPts: ScreenPoint[] = [];
+      const closePts: ScreenPoint[] = [];
+      const lowPts: ScreenPoint[] = [];
+      for (let i = startIdx; i <= endIdx; i++) {
+        const c = candles[i];
+        if (!c) continue;
+        const x = indexToX(i, layout);
+        highPts.push({ x, y: priceToY(c.high, layout) });
+        closePts.push({ x, y: priceToY(c.close, layout) });
+        lowPts.push({ x, y: priceToY(c.low, layout) });
+      }
+      if (closePts.length >= 2) {
+        // High-to-Close green translucent band
+        ctx.fillStyle = 'rgba(8, 153, 129, 0.24)';
+        ctx.beginPath();
+        ctx.moveTo(highPts[0].x, highPts[0].y);
+        for (let k = 1; k < highPts.length; k++) ctx.lineTo(highPts[k].x, highPts[k].y);
+        for (let k = closePts.length - 1; k >= 0; k--) ctx.lineTo(closePts[k].x, closePts[k].y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Close-to-Low red translucent band
+        ctx.fillStyle = 'rgba(242, 54, 69, 0.24)';
+        ctx.beginPath();
+        ctx.moveTo(closePts[0].x, closePts[0].y);
+        for (let k = 1; k < closePts.length; k++) ctx.lineTo(closePts[k].x, closePts[k].y);
+        for (let k = lowPts.length - 1; k >= 0; k--) ctx.lineTo(lowPts[k].x, lowPts[k].y);
+        ctx.closePath();
+        ctx.fill();
+
+        // High & Low outline strokes
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.strokeStyle = upBody;
+        ctx.beginPath();
+        ctx.moveTo(highPts[0].x, highPts[0].y);
+        for (let k = 1; k < highPts.length; k++) ctx.lineTo(highPts[k].x, highPts[k].y);
+        ctx.stroke();
+
+        ctx.strokeStyle = downBody;
+        ctx.beginPath();
+        ctx.moveTo(lowPts[0].x, lowPts[0].y);
+        for (let k = 1; k < lowPts.length; k++) ctx.lineTo(lowPts[k].x, lowPts[k].y);
+        ctx.stroke();
+
+        // Prominent Close line
+        ctx.strokeStyle = seriesLineColor;
+        ctx.lineWidth = seriesLineW;
+        ctx.beginPath();
+        ctx.moveTo(closePts[0].x, closePts[0].y);
+        for (let k = 1; k < closePts.length; k++) ctx.lineTo(closePts[k].x, closePts[k].y);
+        ctx.stroke();
+      }
+    } else if (canonicalType === 'baseline') {
       const pts: ScreenPoint[] = [];
       for (let i = startIdx; i <= endIdx; i++) {
         const c = candles[i];
@@ -843,24 +1345,28 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
       }
       if (pts.length >= 2) {
         const baseY = layout.mainRect.top + layout.mainRect.height * 0.5;
-        // Dashed baseline reference
         ctx.save();
-        ctx.strokeStyle = pal.axisText;
+        ctx.strokeStyle = canvasCfg.scaleTextColor || pal.axisText;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.moveTo(0, baseY);
-        ctx.lineTo(layout.plotWidth, baseY);
+        ctx.moveTo(layout.plotLeft, baseY);
+        ctx.lineTo(layout.plotRight, baseY);
         ctx.stroke();
         ctx.restore();
 
-        // Top green half
+        // Top half (green)
         ctx.save();
         ctx.beginPath();
-        ctx.rect(0, layout.mainRect.top, layout.plotWidth, baseY - layout.mainRect.top);
+        ctx.rect(
+          layout.plotLeft,
+          layout.mainRect.top,
+          layout.plotWidth,
+          baseY - layout.mainRect.top,
+        );
         ctx.clip();
         const upGrad = ctx.createLinearGradient(0, layout.mainRect.top, 0, baseY);
-        upGrad.addColorStop(0, 'rgba(8, 153, 129, 0.30)');
+        upGrad.addColorStop(0, symCfg.baselineTopColor || 'rgba(8, 153, 129, 0.28)');
         upGrad.addColorStop(1, 'rgba(8, 153, 129, 0.02)');
         ctx.fillStyle = upGrad;
         ctx.beginPath();
@@ -869,22 +1375,27 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         ctx.lineTo(pts[pts.length - 1].x, baseY);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = pal.up;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = upBody;
+        ctx.lineWidth = seriesLineW;
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
         ctx.stroke();
         ctx.restore();
 
-        // Bottom red half
+        // Bottom half (red)
         ctx.save();
         ctx.beginPath();
-        ctx.rect(0, baseY, layout.plotWidth, layout.mainRect.bottom - baseY);
+        ctx.rect(
+          layout.plotLeft,
+          baseY,
+          layout.plotWidth,
+          layout.mainRect.bottom - baseY,
+        );
         ctx.clip();
         const downGrad = ctx.createLinearGradient(0, baseY, 0, layout.mainRect.bottom);
         downGrad.addColorStop(0, 'rgba(242, 54, 69, 0.02)');
-        downGrad.addColorStop(1, 'rgba(242, 54, 69, 0.30)');
+        downGrad.addColorStop(1, symCfg.baselineBottomColor || 'rgba(242, 54, 69, 0.28)');
         ctx.fillStyle = downGrad;
         ctx.beginPath();
         ctx.moveTo(pts[0].x, baseY);
@@ -892,25 +1403,61 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         ctx.lineTo(pts[pts.length - 1].x, baseY);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = pal.down;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = downBody;
+        ctx.lineWidth = seriesLineW;
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
         for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y);
         ctx.stroke();
         ctx.restore();
       }
+    } else if (canonicalType === 'columns') {
+      const colW = Math.max(1.5, Math.min(18, layout.barStepPx * 0.68));
+      for (let i = startIdx; i <= endIdx; i++) {
+        const c = candles[i];
+        if (!c) continue;
+        const prevC = candles[i - 1];
+        const x = indexToX(i, layout);
+        const yC = priceToY(c.close, layout);
+        const isUp = symCfg.colorBarsBasedOnPrevClose
+          ? c.close >= (prevC?.close ?? c.open)
+          : c.close >= c.open;
+        ctx.fillStyle = isUp ? upBody : downBody;
+        ctx.fillRect(
+          x - colW / 2,
+          yC,
+          colW,
+          Math.max(1, layout.mainRect.bottom - yC),
+        );
+      }
+    } else if (canonicalType === 'high_low') {
+      const barW = Math.max(2, Math.min(16, layout.barStepPx * 0.56));
+      for (let i = startIdx; i <= endIdx; i++) {
+        const c = candles[i];
+        if (!c) continue;
+        const x = indexToX(i, layout);
+        const yH = priceToY(c.high, layout);
+        const yL = priceToY(c.low, layout);
+        const top = Math.min(yH, yL);
+        const h = Math.max(2, Math.abs(yL - yH));
+        ctx.fillStyle = 'rgba(41, 98, 255, 0.28)';
+        ctx.fillRect(x - barW / 2, top, barW, h);
+        ctx.strokeStyle = seriesLineColor;
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([]);
+        ctx.strokeRect(x - barW / 2 + 0.5, top + 0.5, Math.max(1, barW - 1), Math.max(1, h - 1));
+      }
     }
   }
 
   // ======================== 5. OVERLAY INDICATOR PLOTS ========================
-  for (const ind of overlaySeries) {
+  for (const ind of visibleOverlays) {
     for (const plot of ind.plots) {
       ctx.save();
       ctx.strokeStyle = plot.color;
       ctx.fillStyle = plot.color;
       ctx.lineWidth = plot.lineWidth ?? 1.6;
-      setDash(ctx, plot.lineStyle);
+      applyLineDash(ctx, plot.lineStyle);
 
       if (plot.kind === 'dots') {
         for (let i = startIdx; i <= endIdx; i++) {
@@ -945,7 +1492,10 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
   }
 
   // ======================== 6. COMPARISON SYMBOL CURVES ========================
-  if (compareSeries.length > 0 && layout.scaleMode === 'percent') {
+  if (
+    compareSeries.length > 0 &&
+    (layout.scaleMode === 'percent' || layout.scaleMode === 'indexed100')
+  ) {
     const firstT = candles[Math.max(0, startIdx)]?.time;
     for (const comp of compareSeries) {
       const compBase =
@@ -963,11 +1513,11 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         if (t == null) continue;
         const val = comp.byTime.get(t);
         if (val == null || !Number.isFinite(val)) continue;
-        const pct = ((val - compBase) / Math.max(1e-9, compBase)) * 100;
-        const y =
-          layout.mainRect.bottom -
-          ((pct - layout.mainMin) / Math.max(1e-9, layout.mainMax - layout.mainMin)) *
-            layout.mainRect.height;
+        const scaledComp =
+          layout.scaleMode === 'indexed100'
+            ? (val / Math.max(1e-12, compBase)) * 100
+            : ((val - compBase) / Math.max(1e-12, compBase)) * 100;
+        const y = scaledToY(scaledComp, layout);
         const x = indexToX(i, layout);
         if (!started) {
           ctx.moveTo(x, y);
@@ -981,129 +1531,296 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     }
   }
 
-  // ======================== 7. PAPER POSITIONS & ACTIVE ALERTS ========================
-  for (const pos of positions) {
-    if (pos.symbol !== symbol.ticker) continue;
-    const entryY = Math.round(priceToY(pos.avgEntryPrice, layout)) + 0.5;
-    const posColor = pos.unrealizedPnl >= 0 ? '#089981' : '#f23645';
-    ctx.save();
-    ctx.strokeStyle = '#2962ff';
-    ctx.lineWidth = 1.25;
-    ctx.setLineDash([5, 3]);
-    ctx.beginPath();
-    ctx.moveTo(0, entryY);
-    ctx.lineTo(layout.plotWidth, entryY);
-    ctx.stroke();
-
-    const pnlSign = pos.unrealizedPnl >= 0 ? '+' : '';
-    const tag = `${pos.side === 'long' ? 'LONG' : 'SHORT'} ${pos.quantity} · ${pnlSign}${formatPrice(pos.unrealizedPnl, 2)} €`;
-    ctx.font = '600 11px -apple-system, sans-serif';
-    const tw = ctx.measureText(tag).width + 14;
-    const tx = Math.max(10, layout.plotWidth - tw - 12);
-    ctx.fillStyle = posColor;
-    drawRoundedRect(ctx, tx, entryY - 10, tw, 20, 4);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(tag, tx + 7, entryY);
-
-    if (pos.takeProfit) {
-      const tpY = Math.round(priceToY(pos.takeProfit, layout)) + 0.5;
-      ctx.strokeStyle = '#089981';
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(0, tpY);
-      ctx.lineTo(layout.plotWidth, tpY);
-      ctx.stroke();
+  // ======================== 6b. VISIBLE HIGH / LOW PRICE FLAGS ========================
+  let visibleMaxPrice = -Infinity;
+  let visibleMaxIdx = -1;
+  let visibleMinPrice = Infinity;
+  let visibleMinIdx = -1;
+  if (scalesCfg.showHighLowLabels && candles.length > 0) {
+    for (let i = Math.max(0, startIdx); i <= Math.min(candles.length - 1, endIdx); i++) {
+      const c = candles[i];
+      if (!c) continue;
+      if (c.high > visibleMaxPrice) {
+        visibleMaxPrice = c.high;
+        visibleMaxIdx = i;
+      }
+      if (c.low < visibleMinPrice) {
+        visibleMinPrice = c.low;
+        visibleMinIdx = i;
+      }
     }
-    if (pos.stopLoss) {
-      const slY = Math.round(priceToY(pos.stopLoss, layout)) + 0.5;
-      ctx.strokeStyle = '#f23645';
-      ctx.setLineDash([3, 3]);
+    const drawHLFlag = (barIdx: number, price: number, prefix: string, color: string) => {
+      const x = indexToX(barIdx, layout);
+      const y = Math.round(priceToY(price, layout)) + 0.5;
+      const stubToRight = x < layout.plotLeft + layout.plotWidth * 0.7;
+      const stubEndX = stubToRight ? x + 28 : x - 28;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
       ctx.beginPath();
-      ctx.moveTo(0, slY);
-      ctx.lineTo(layout.plotWidth, slY);
+      ctx.moveTo(x, y);
+      ctx.lineTo(stubEndX, y);
       ctx.stroke();
-    }
-    ctx.restore();
+      ctx.font = `600 10px ${FONT_FAMILY}`;
+      ctx.fillStyle = color;
+      ctx.textAlign = stubToRight ? 'left' : 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${prefix} ${formatPrice(price, effectivePrecision)}`,
+        stubEndX + (stubToRight ? 4 : -4),
+        y,
+      );
+      ctx.restore();
+    };
+    if (visibleMaxIdx >= 0) drawHLFlag(visibleMaxIdx, visibleMaxPrice, 'Max', upBody);
+    if (visibleMinIdx >= 0) drawHLFlag(visibleMinIdx, visibleMinPrice, 'Min', downBody);
   }
 
-  for (const al of alerts) {
-    if (al.symbol !== symbol.ticker || al.status !== 'active' || al.target !== 'price') continue;
-    const ay = Math.round(priceToY(al.value, layout)) + 0.5;
-    if (ay < layout.mainRect.top - 10 || ay > layout.mainRect.bottom + 10) continue;
-    ctx.save();
-    ctx.strokeStyle = '#ff9800';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, ay);
-    ctx.lineTo(layout.plotWidth, ay);
-    ctx.stroke();
+  // ======================== 7. PAPER POSITIONS, ORDERS, EXECUTIONS & ALERTS ========================
+  if (!hidePositions && tradingCfg.showPositions) {
+    const lineStartX = tradingCfg.extendLinesLeft
+      ? layout.plotLeft
+      : layout.plotLeft + layout.plotWidth * 0.55;
+    for (const pos of positions) {
+      if (pos.symbol !== symbol.ticker) continue;
+      const entryY = Math.round(priceToY(pos.avgEntryPrice, layout)) + 0.5;
+      const posColor = pos.unrealizedPnl >= 0 ? '#089981' : '#f23645';
+      ctx.save();
+      ctx.strokeStyle = '#2962ff';
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, entryY);
+      ctx.lineTo(layout.plotRight, entryY);
+      ctx.stroke();
 
-    const lbl = `Avviso ${formatPrice(al.value, symbol.precision)}`;
-    ctx.font = '600 10.5px -apple-system, sans-serif';
-    const tw = ctx.measureText(lbl).width + 14;
-    const ax = Math.max(10, layout.plotWidth - tw - 12);
-    ctx.fillStyle = '#ff9800';
-    drawRoundedRect(ctx, ax, ay - 9, tw, 18, 4);
-    ctx.fill();
-    ctx.fillStyle = '#000000';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(lbl, ax + 7, ay);
-    ctx.restore();
+      const pnlSign = pos.unrealizedPnl >= 0 ? '+' : '';
+      const tag = `${pos.side === 'long' ? 'LONG' : 'SHORT'} ${pos.quantity} · ${pnlSign}${formatPrice(pos.unrealizedPnl, 2)} €`;
+      ctx.font = `600 11px ${FONT_FAMILY}`;
+      const tw = ctx.measureText(tag).width + 14;
+      const tx = Math.max(layout.plotLeft + 10, layout.plotRight - tw - 12);
+      ctx.fillStyle = posColor;
+      drawRoundedRectPath(ctx, tx, entryY - 10, tw, 20, 4);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tag, tx + 7, entryY);
+
+      if (pos.takeProfit) {
+        const tpY = Math.round(priceToY(pos.takeProfit, layout)) + 0.5;
+        ctx.strokeStyle = '#089981';
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(lineStartX, tpY);
+        ctx.lineTo(layout.plotRight, tpY);
+        ctx.stroke();
+      }
+      if (pos.stopLoss) {
+        const slY = Math.round(priceToY(pos.stopLoss, layout)) + 0.5;
+        ctx.strokeStyle = '#f23645';
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(lineStartX, slY);
+        ctx.lineTo(layout.plotRight, slY);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
-  // ======================== 8. INTERACTIVE DRAWINGS LAYER ========================
+  // Pending Limit/Stop Orders
+  if (!hidePositions && tradingCfg.showOrders && orders.length > 0) {
+    const lineStartX = tradingCfg.extendLinesLeft
+      ? layout.plotLeft
+      : layout.plotLeft + layout.plotWidth * 0.55;
+    for (const ord of orders) {
+      if (ord.symbol !== symbol.ticker || ord.status !== 'open') continue;
+      const targetPrice = ord.limitPrice ?? ord.stopPrice;
+      if (targetPrice == null) continue;
+      const oy = Math.round(priceToY(targetPrice, layout)) + 0.5;
+      const col = ord.side === 'buy' ? '#2962ff' : '#f23645';
+      ctx.save();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(lineStartX, oy);
+      ctx.lineTo(layout.plotRight, oy);
+      ctx.stroke();
+
+      const lbl = `${ord.type.toUpperCase()} ${ord.side === 'buy' ? 'BUY' : 'SELL'} ${ord.quantity} @ ${formatPrice(targetPrice, effectivePrecision)}`;
+      ctx.font = `600 10px ${FONT_FAMILY}`;
+      const tw = ctx.measureText(lbl).width + 12;
+      const ox = Math.max(layout.plotLeft + 10, layout.plotRight - tw - 12);
+      ctx.fillStyle = col;
+      drawRoundedRectPath(ctx, ox, oy - 9, tw, 18, 4);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, ox + 6, oy);
+      ctx.restore();
+    }
+  }
+
+  // Filled Execution Markers
+  if (!hidePositions && tradingCfg.showExecutions && executions.length > 0) {
+    for (const ex of executions) {
+      if (ex.symbol !== symbol.ticker || ex.status !== 'filled' || !ex.filledPrice) continue;
+      const sec = Math.floor((ex.filledAt ?? ex.createdAt) / 1000);
+      const idx = timeToIndex(sec, rawCandles);
+      const x = indexToX(idx, layout);
+      if (x < layout.plotLeft - 10 || x > layout.plotRight + 10) continue;
+      const y = priceToY(ex.filledPrice, layout);
+      const isBuy = ex.side === 'buy';
+      ctx.save();
+      ctx.fillStyle = isBuy ? '#2962ff' : '#f23645';
+      ctx.beginPath();
+      if (isBuy) {
+        ctx.moveTo(x, y + 3);
+        ctx.lineTo(x - 5, y + 11);
+        ctx.lineTo(x + 5, y + 11);
+      } else {
+        ctx.moveTo(x, y - 3);
+        ctx.lineTo(x - 5, y - 11);
+        ctx.lineTo(x + 5, y - 11);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  // Price Alerts Lines
+  if (alertsCfg.showAlertLines && hideMode !== 'all') {
+    const alertCol = alertsCfg.alertLineColor || '#ff9800';
+    for (const al of alerts) {
+      if (al.symbol !== symbol.ticker || al.target !== 'price') continue;
+      if (alertsCfg.onlyActiveAlerts && al.status !== 'active') continue;
+      if (!alertsCfg.onlyActiveAlerts && al.status === 'expired') continue;
+      const ay = Math.round(priceToY(al.value, layout)) + 0.5;
+      if (ay < layout.mainRect.top - 10 || ay > layout.mainRect.bottom + 10) continue;
+      ctx.save();
+      ctx.strokeStyle = alertCol;
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(layout.plotLeft, ay);
+      ctx.lineTo(layout.plotRight, ay);
+      ctx.stroke();
+
+      const lbl = `Avviso ${formatPrice(al.value, effectivePrecision)}`;
+      ctx.font = `600 10.5px ${FONT_FAMILY}`;
+      const tw = ctx.measureText(lbl).width + 14;
+      const ax = Math.max(layout.plotLeft + 10, layout.plotRight - tw - 12);
+      ctx.fillStyle = alertCol;
+      drawRoundedRectPath(ctx, ax, ay - 9, tw, 18, 4);
+      ctx.fill();
+      ctx.fillStyle = '#000000';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, ax + 7, ay);
+      ctx.restore();
+    }
+  }
+
+  // ======================== 8. INTERACTIVE DRAWINGS LAYER (ALL 64 TOOLS) ========================
   const toScreen = (pt: DrawingPoint): ScreenPoint => ({
     x: indexToX(timeToIndex(pt.time, rawCandles), layout),
     y: priceToY(pt.price, layout),
   });
 
-  if (!hideDrawings) {
-    const allDrawings = draftDrawing ? [...drawings, draftDrawing] : drawings;
-    for (const d of allDrawings) {
-      if (!d.visible || d.points.length === 0) continue;
-      const isSelected = d.id === selectedDrawingId;
-      renderSingleDrawing(
+  if (!hideAllDrawings) {
+    renderAllDrawings(
+      {
         ctx,
-        d,
+        plotLeft: layout.plotLeft,
+        plotRight: layout.plotRight,
+        plotWidth: layout.plotWidth,
+        mainTop: layout.mainRect.top,
+        mainBottom: layout.mainRect.bottom,
+        mainHeight: layout.mainRect.height,
+        candles: rawCandles,
+        precision: effectivePrecision,
+        theme,
+        priceScalePosition: layout.priceScalePosition,
         toScreen,
-        layout,
-        rawCandles,
-        symbol.precision,
-        isSelected,
-      );
-    }
+        priceToY: (p) => priceToY(p, layout),
+        indexToX: (idx) => indexToX(idx, layout),
+        timeToIndex: (t) => timeToIndex(t, rawCandles),
+      },
+      drawings,
+      draftDrawing,
+      selectedDrawingId,
+      eraserHoveredId,
+      timeframe,
+    );
   }
 
-  // ======================== 9. LIVE LAST-PRICE DOTTED LINE ========================
+  // ======================== 9. LIVE LAST-PRICE & BID/ASK LINES ========================
   const lastCandle = rawCandles[rawCandles.length - 1];
-  if (lastCandle) {
+  if (lastCandle && symCfg.showLastPriceLine) {
     const lastY = Math.round(priceToY(lastCandle.close, layout)) + 0.5;
-    const lastColor = lastCandle.close >= lastCandle.open ? pal.up : pal.down;
+    const lastColor = lastCandle.close >= lastCandle.open ? upBody : downBody;
     ctx.save();
     ctx.strokeStyle = lastColor;
     ctx.lineWidth = 1;
-    ctx.setLineDash([2, 3]);
+    applyLineDash(ctx, symCfg.lastPriceLineStyle);
     ctx.beginPath();
-    ctx.moveTo(0, lastY);
-    ctx.lineTo(layout.plotWidth, lastY);
+    ctx.moveTo(layout.plotLeft, lastY);
+    ctx.lineTo(layout.plotRight, lastY);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  if (scalesCfg.showBidAskLines && bidPrice != null && askPrice != null) {
+    const yBid = Math.round(priceToY(bidPrice, layout)) + 0.5;
+    const yAsk = Math.round(priceToY(askPrice, layout)) + 0.5;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.strokeStyle = '#f23645';
+    ctx.beginPath();
+    ctx.moveTo(layout.plotLeft, yBid);
+    ctx.lineTo(layout.plotRight, yBid);
+    ctx.stroke();
+    ctx.strokeStyle = '#2962ff';
+    ctx.beginPath();
+    ctx.moveTo(layout.plotLeft, yAsk);
+    ctx.lineTo(layout.plotRight, yAsk);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ======================== 9b. ZOOM-IN SELECTION BOX ========================
+  if (zoomBox) {
+    const zx = Math.min(zoomBox.x1, zoomBox.x2);
+    const zy = Math.min(zoomBox.y1, zoomBox.y2);
+    const zw = Math.abs(zoomBox.x2 - zoomBox.x1);
+    const zh = Math.abs(zoomBox.y2 - zoomBox.y1);
+    ctx.save();
+    ctx.fillStyle = 'rgba(41, 98, 255, 0.16)';
+    ctx.fillRect(zx, zy, zw, zh);
+    ctx.strokeStyle = '#2962FF';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeRect(zx + 0.5, zy + 0.5, zw, zh);
     ctx.restore();
   }
 
   ctx.restore(); // End Main Pane clip
 
   // ======================== 10. SUB-PANES (RSI / MACD / STOCH / ATR / PINE) ========================
+  const scaleFontPx = Math.max(9, Math.min(14, canvasCfg.scaleFontSize || 11));
+  const axisTextColor = canvasCfg.scaleTextColor || pal.axisText;
+
   for (const sp of layout.subPanes) {
     const { series, rect, min, max } = sp;
     const valToSubY = (v: number) =>
       rect.bottom - ((v - min) / Math.max(1e-9, max - min)) * rect.height;
 
-    // Top border divider
     ctx.strokeStyle = pal.axisBorder;
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
@@ -1114,10 +1831,9 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, rect.top, layout.plotWidth, rect.height);
+    ctx.rect(layout.plotLeft, rect.top, layout.plotWidth, rect.height);
     ctx.clip();
 
-    // Shaded RSI/Stoch channel if 2+ reference hlines (e.g. 30-70 or 20-80)
     if (series.hlines && series.hlines.length >= 2) {
       const vals = series.hlines.map((h) => h.value).sort((a, b) => a - b);
       const lowVal = vals[0];
@@ -1126,27 +1842,25 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         const yTop = valToSubY(highVal);
         const yBot = valToSubY(lowVal);
         ctx.fillStyle = pal.subShade;
-        ctx.fillRect(0, yTop, layout.plotWidth, yBot - yTop);
+        ctx.fillRect(layout.plotLeft, yTop, layout.plotWidth, yBot - yTop);
       }
     }
 
-    // Sub-pane horizontal reference lines
     if (series.hlines) {
       for (const hl of series.hlines) {
         const hy = Math.round(valToSubY(hl.value)) + 0.5;
         ctx.save();
         ctx.strokeStyle = hl.color;
         ctx.lineWidth = 1;
-        setDash(ctx, hl.lineStyle ?? 'dashed');
+        applyLineDash(ctx, hl.lineStyle ?? 'dashed');
         ctx.beginPath();
-        ctx.moveTo(0, hy);
-        ctx.lineTo(layout.plotWidth, hy);
+        ctx.moveTo(layout.plotLeft, hy);
+        ctx.lineTo(layout.plotRight, hy);
         ctx.stroke();
         ctx.restore();
       }
     }
 
-    // Sub-pane plots
     const zeroY = valToSubY(0);
     for (const plot of series.plots) {
       if (plot.kind === 'histogram') {
@@ -1180,7 +1894,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         ctx.save();
         ctx.strokeStyle = plot.color;
         ctx.lineWidth = plot.lineWidth ?? 1.6;
-        setDash(ctx, plot.lineStyle);
+        applyLineDash(ctx, plot.lineStyle);
         let started = false;
         ctx.beginPath();
         for (let i = startIdx; i <= endIdx; i++) {
@@ -1205,12 +1919,14 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
 
     // Sub-pane Legend Title + Live Value
     const refIdx =
-      crosshair.visible && crosshair.barIndex >= 0 && crosshair.barIndex < rawCandles.length
+      crosshair.visible &&
+      crosshair.barIndex >= 0 &&
+      crosshair.barIndex < rawCandles.length
         ? crosshair.barIndex
         : rawCandles.length - 1;
-    let legendX = 10;
+    let legendX = layout.plotLeft + 10;
     const legendY = rect.top + 13;
-    ctx.font = '600 11px -apple-system, sans-serif';
+    ctx.font = `600 11px ${FONT_FAMILY}`;
     ctx.fillStyle = pal.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -1229,115 +1945,236 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
 
     ctx.restore(); // end sub-pane clip
 
-    // Sub-pane Right Axis labels
+    // Sub-pane Price Axis labels (left or right)
     const subTicks = niceTicks(min, max, 3);
-    ctx.fillStyle = pal.axisText;
-    ctx.font = '11px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
+    ctx.fillStyle = axisTextColor;
+    ctx.font = `${scaleFontPx}px ${FONT_FAMILY}`;
+    ctx.textAlign = priceScalePosition === 'left' ? 'right' : 'left';
     ctx.textBaseline = 'middle';
+    const subLabelX =
+      priceScalePosition === 'left'
+        ? layout.priceAxisWidth - 6
+        : layout.priceAxisLeft + 6;
     for (const stv of subTicks) {
       const sy = valToSubY(stv);
       if (sy < rect.top + 10 || sy > rect.bottom - 10) continue;
       ctx.fillText(
         Math.abs(stv) >= 1000 ? formatVolume(stv) : stv.toFixed(1),
-        layout.plotWidth + 6,
+        subLabelX,
         sy,
       );
     }
   }
 
-  // ======================== 11. RIGHT PRICE AXIS & TIME AXIS CHROME ========================
+  // ======================== 11. PRICE AXIS (LEFT OR RIGHT) & TIME AXIS CHROME ========================
   ctx.strokeStyle = pal.axisBorder;
   ctx.lineWidth = 1;
   ctx.setLineDash([]);
-  // Vertical price axis border
+  const axisBorderX =
+    priceScalePosition === 'left'
+      ? Math.round(layout.plotLeft) + 0.5
+      : Math.round(layout.plotRight) + 0.5;
   ctx.beginPath();
-  ctx.moveTo(Math.round(layout.plotWidth) + 0.5, 0);
-  ctx.lineTo(Math.round(layout.plotWidth) + 0.5, height);
+  ctx.moveTo(axisBorderX, 0);
+  ctx.lineTo(axisBorderX, height);
   ctx.stroke();
 
-  // Horizontal time axis border
   ctx.beginPath();
   ctx.moveTo(0, Math.round(layout.timeAxisTop) + 0.5);
   ctx.lineTo(width, Math.round(layout.timeAxisTop) + 0.5);
   ctx.stroke();
 
-  // Main price axis labels
-  ctx.fillStyle = pal.axisText;
-  ctx.font = symbol.precision >= 6
-    ? '10px -apple-system, BlinkMacSystemFont, "Trebuchet MS", sans-serif'
-    : '11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", sans-serif';
-  ctx.textAlign = 'left';
+  // Optional currency / unit badge at top of price axis
+  if (scalesCfg.showCurrencyUnit && symbol.currency) {
+    const unitLabel =
+      layout.scaleMode === 'percent'
+        ? '%'
+        : layout.scaleMode === 'indexed100'
+          ? '100'
+          : symbol.currency;
+    ctx.fillStyle = pal.axisBorder;
+    drawRoundedRectPath(
+      ctx,
+      layout.priceAxisLeft + 6,
+      4,
+      layout.priceAxisWidth - 12,
+      16,
+      3,
+    );
+    ctx.fill();
+    ctx.fillStyle = axisTextColor;
+    ctx.font = `600 9.5px ${FONT_FAMILY}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(unitLabel, layout.priceAxisLeft + layout.priceAxisWidth / 2, 12);
+  }
+
+  // Main price axis tick labels
+  const tickFontPx = effectivePrecision >= 6 ? Math.min(10, scaleFontPx) : scaleFontPx;
+  ctx.fillStyle = axisTextColor;
+  ctx.font = `${tickFontPx}px ${FONT_FAMILY}`;
+  ctx.textAlign = priceScalePosition === 'left' ? 'right' : 'left';
   ctx.textBaseline = 'middle';
+  const tickTextX =
+    priceScalePosition === 'left'
+      ? layout.priceAxisWidth - 5
+      : layout.priceAxisLeft + 5;
+  const topLabelClearance = scalesCfg.showCurrencyUnit ? 26 : 12;
+
   for (const tv of mainTicks) {
-    const y =
-      layout.mainRect.bottom -
-      ((tv - layout.mainMin) / Math.max(1e-12, layout.mainMax - layout.mainMin)) *
-        layout.mainRect.height;
-    if (y < 12 || y > layout.mainRect.bottom - 10) continue;
+    const y = scaledToY(tv, layout);
+    if (y < topLabelClearance || y > layout.mainRect.bottom - 10) continue;
     ctx.fillText(
-      formatAxisPrice(tv, layout.scaleMode, layout.basePrice, symbol.precision),
-      layout.plotWidth + 5,
+      formatAxisPrice(tv, layout.scaleMode, layout.basePrice, effectivePrecision),
+      tickTextX,
       y,
     );
   }
 
-  // Live Last-Price Badge + Optional Countdown on Price Axis
-  if (lastCandle) {
-    const lastY = Math.max(
-      14,
-      Math.min(layout.mainRect.bottom - 14, priceToY(lastCandle.close, layout)),
+  // Helper to draw a price-axis badge pill cleanly on either Left or Right axis
+  const occupiedPills: OccupiedInterval[] = [];
+  const drawAxisBadge = (
+    desiredY: number,
+    bg: string,
+    mainText: string,
+    subText?: string | null,
+    namePrefix?: string | null,
+  ) => {
+    const badgeH = subText ? 30 : 20;
+    const cy = resolveNonOverlappingY(
+      desiredY,
+      badgeH,
+      topLabelClearance,
+      layout.mainRect.bottom - 4,
+      occupiedPills,
+      scalesCfg.noOverlappingLabels,
     );
-    const lastColor = lastCandle.close >= lastCandle.open ? pal.up : pal.down;
-    const badgeH = countdownText ? 30 : 20;
-    const badgeY = lastY - (countdownText ? 11 : 10);
-    ctx.fillStyle = lastColor;
-    ctx.fillRect(layout.plotWidth + 1, badgeY, layout.priceAxisWidth - 1, badgeH);
+    const badgeY = cy - badgeH / 2;
+    const bx =
+      priceScalePosition === 'left' ? 0 : layout.priceAxisLeft + 1;
+    const bw = layout.priceAxisWidth - 1;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(bx, badgeY, bw, badgeH);
     ctx.fillStyle = '#ffffff';
-    ctx.font = symbol.precision >= 6
-      ? '600 10px -apple-system, sans-serif'
-      : '600 11px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
+    ctx.font = `600 ${tickFontPx}px ${FONT_FAMILY}`;
+    ctx.textAlign = priceScalePosition === 'left' ? 'right' : 'left';
     ctx.textBaseline = 'middle';
-    const priceText =
-      layout.scaleMode === 'percent'
-        ? formatAxisPrice(
-            toScaledValue(lastCandle.close, 'percent', layout.basePrice),
-            'percent',
-            layout.basePrice,
-            symbol.precision,
-          )
-        : formatPrice(lastCandle.close, symbol.precision);
-    ctx.fillText(priceText, layout.plotWidth + 5, badgeY + 9);
-    if (countdownText) {
-      ctx.font = '500 9.5px -apple-system, sans-serif';
+    ctx.fillText(mainText, tickTextX, subText ? badgeY + 9 : cy);
+    if (subText) {
+      ctx.font = `500 9.5px ${FONT_FAMILY}`;
       ctx.fillStyle = 'rgba(255,255,255,0.88)';
-      ctx.fillText(countdownText, layout.plotWidth + 5, badgeY + 22);
+      ctx.fillText(subText, tickTextX, badgeY + 22);
+    }
+
+    if (namePrefix) {
+      ctx.font = `700 10px ${FONT_FAMILY}`;
+      const nw = ctx.measureText(namePrefix).width + 10;
+      const nx =
+        priceScalePosition === 'left'
+          ? layout.plotLeft + 2
+          : layout.plotRight - nw - 2;
+      ctx.fillStyle = bg;
+      drawRoundedRectPath(ctx, nx, cy - 9, nw, 18, 3);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(namePrefix, nx + nw / 2, cy);
+    }
+  };
+
+  // Live Last-Price Badge (+ optional Countdown + optional Symbol Name tag)
+  if (lastCandle && scalesCfg.showSymbolLastValueLabel) {
+    const lastY = priceToY(lastCandle.close, layout);
+    const lastColor = lastCandle.close >= lastCandle.open ? upBody : downBody;
+    const priceText =
+      layout.scaleMode === 'percent' || layout.scaleMode === 'indexed100'
+        ? formatAxisPrice(
+            toScaledValue(lastCandle.close, layout.scaleMode, layout.basePrice),
+            layout.scaleMode,
+            layout.basePrice,
+            effectivePrecision,
+          )
+        : formatPrice(lastCandle.close, effectivePrecision);
+    drawAxisBadge(
+      lastY,
+      lastColor,
+      priceText,
+      scalesCfg.showCountdown ? countdownText : null,
+      scalesCfg.showSymbolNameLabel ? symbol.ticker : null,
+    );
+  }
+
+  // Bid / Ask Axis Badges
+  if (scalesCfg.showBidAskLabels && bidPrice != null && askPrice != null) {
+    drawAxisBadge(
+      priceToY(askPrice, layout),
+      '#2962ff',
+      formatPrice(askPrice, effectivePrecision),
+      null,
+      'Ask',
+    );
+    drawAxisBadge(
+      priceToY(bidPrice, layout),
+      '#f23645',
+      formatPrice(bidPrice, effectivePrecision),
+      null,
+      'Bid',
+    );
+  }
+
+  // Overlay Indicator Last-Value Axis Badges
+  if (scalesCfg.showIndicatorValueLabels && rawCandles.length > 0) {
+    const lastIdx = rawCandles.length - 1;
+    for (const ind of visibleOverlays) {
+      for (const plot of ind.plots.slice(0, 2)) {
+        const val = plot.data[lastIdx]?.value;
+        if (val == null || !Number.isFinite(val)) continue;
+        const py = priceToY(val, layout);
+        if (py < layout.mainRect.top || py > layout.mainRect.bottom) continue;
+        const valText =
+          layout.scaleMode === 'percent' || layout.scaleMode === 'indexed100'
+            ? formatAxisPrice(
+                toScaledValue(val, layout.scaleMode, layout.basePrice),
+                layout.scaleMode,
+                layout.basePrice,
+                effectivePrecision,
+              )
+            : formatPrice(val, effectivePrecision);
+        drawAxisBadge(
+          py,
+          plot.color,
+          valText,
+          null,
+          scalesCfg.showIndicatorNameLabels ? ind.title.slice(0, 12) : null,
+        );
+      }
     }
   }
 
   // Time Axis Labels
-  ctx.fillStyle = pal.axisText;
-  ctx.font = '11px -apple-system, BlinkMacSystemFont, "Trebuchet MS", sans-serif';
+  ctx.fillStyle = axisTextColor;
+  ctx.font = `${scaleFontPx}px ${FONT_FAMILY}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const idx of xTickIndices) {
     const c = candles[idx];
     if (!c) continue;
     const x = indexToX(idx, layout);
-    if (x < 28 || x > layout.plotWidth - 28) continue;
+    if (x < layout.plotLeft + 28 || x > layout.plotRight - 28) continue;
     ctx.fillText(
-      formatAxisTime(c.time, timeframe, false),
+      formatAxisTime(c.time, timeframe, false, scalesCfg.dateFormat, symCfg.timezone),
       x,
       layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
     );
   }
 
-  // ======================== 12. INTERACTIVE CROSSHAIR & AXIS PILLS ========================
+  // ======================== 12. INTERACTIVE CROSSHAIR, AXIS PILLS & `+` BUTTON ========================
   if (
     crosshair.visible &&
-    crosshair.x >= 0 &&
-    crosshair.x <= layout.plotWidth &&
+    crosshair.x >= layout.plotLeft &&
+    crosshair.x <= layout.plotRight &&
     crosshair.y >= 0 &&
     crosshair.y <= layout.timeAxisTop
   ) {
@@ -1347,408 +2184,146 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         : Math.round(crosshair.x) + 0.5;
     const cy = Math.round(crosshair.y) + 0.5;
 
-    ctx.save();
-    ctx.strokeStyle = pal.crosshair;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    // Vertical line across main + all sub-panes
-    ctx.beginPath();
-    ctx.moveTo(snapX, 0);
-    ctx.lineTo(snapX, layout.timeAxisTop);
-    ctx.stroke();
+    if (cursorMode === 'crosshair') {
+      ctx.save();
+      ctx.strokeStyle = canvasCfg.crosshairColor || pal.crosshair;
+      ctx.lineWidth = Math.max(0.75, canvasCfg.crosshairWidth || 1);
+      applyLineDash(ctx, canvasCfg.crosshairStyle);
+      ctx.beginPath();
+      ctx.moveTo(snapX, 0);
+      ctx.lineTo(snapX, layout.timeAxisTop);
+      ctx.stroke();
 
-    // Horizontal line across plot
-    ctx.beginPath();
-    ctx.moveTo(0, cy);
-    ctx.lineTo(layout.plotWidth, cy);
-    ctx.stroke();
-    ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(layout.plotLeft, cy);
+      ctx.lineTo(layout.plotRight, cy);
+      ctx.stroke();
+      ctx.restore();
+    } else if (cursorMode === 'dot') {
+      ctx.save();
+      ctx.fillStyle = canvasCfg.crosshairColor || pal.crosshair;
+      ctx.beginPath();
+      ctx.arc(snapX, cy, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
-    // Right-axis Crosshair Price/Oscillator Pill
-    let yLabel = '';
-    if (cy <= layout.mainRect.bottom) {
-      const pVal = yToPrice(cy, layout);
-      yLabel =
-        layout.scaleMode === 'percent'
-          ? formatAxisPrice(
-              toScaledValue(pVal, 'percent', layout.basePrice),
-              'percent',
-              layout.basePrice,
-              symbol.precision,
-            )
-          : formatPrice(pVal, symbol.precision);
-    } else {
-      const hitSub = layout.subPanes.find(
-        (sp) => cy >= sp.rect.top && cy <= sp.rect.bottom,
-      );
-      if (hitSub) {
-        const ratio =
-          (hitSub.rect.bottom - cy) / Math.max(1, hitSub.rect.height);
-        const val = hitSub.min + ratio * (hitSub.max - hitSub.min);
-        yLabel = Math.abs(val) >= 1000 ? formatVolume(val) : val.toFixed(2);
+    if (cursorMode === 'crosshair' || cursorMode === 'dot') {
+      // Price Axis Crosshair Pill
+      let yLabel = '';
+      if (cy <= layout.mainRect.bottom) {
+        const pVal = yToPrice(cy, layout);
+        yLabel =
+          layout.scaleMode === 'percent' || layout.scaleMode === 'indexed100'
+            ? formatAxisPrice(
+                toScaledValue(pVal, layout.scaleMode, layout.basePrice),
+                layout.scaleMode,
+                layout.basePrice,
+                effectivePrecision,
+              )
+            : formatPrice(pVal, effectivePrecision);
+      } else {
+        const hitSub = layout.subPanes.find(
+          (sp) => cy >= sp.rect.top && cy <= sp.rect.bottom,
+        );
+        if (hitSub) {
+          const ratio =
+            (hitSub.rect.bottom - cy) / Math.max(1, hitSub.rect.height);
+          const val = hitSub.min + ratio * (hitSub.max - hitSub.min);
+          yLabel = Math.abs(val) >= 1000 ? formatVolume(val) : val.toFixed(2);
+        }
       }
-    }
 
-    if (yLabel) {
+      if (yLabel) {
+        const bx =
+          priceScalePosition === 'left' ? 0 : layout.priceAxisLeft + 1;
+        ctx.fillStyle = pal.pillBg;
+        ctx.fillRect(bx, cy - 10, layout.priceAxisWidth - 1, 20);
+        ctx.fillStyle = pal.pillText;
+        ctx.font = `600 ${tickFontPx}px ${FONT_FAMILY}`;
+        ctx.textAlign = priceScalePosition === 'left' ? 'right' : 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(yLabel, tickTextX, cy);
+      }
+
+      // Bottom Time-Axis Date Pill
+      const hoveredTime = indexToTime(crosshair.barIndex, rawCandles);
+      const timeStr = formatAxisTime(
+        hoveredTime,
+        timeframe,
+        true,
+        scalesCfg.dateFormat,
+        symCfg.timezone,
+      );
+      ctx.font = `600 11px ${FONT_FAMILY}`;
+      const tw = ctx.measureText(timeStr).width + 16;
+      const pillX = Math.max(
+        layout.plotLeft + 2,
+        Math.min(layout.plotRight - tw - 2, snapX - tw / 2),
+      );
       ctx.fillStyle = pal.pillBg;
-      ctx.fillRect(layout.plotWidth + 1, cy - 10, layout.priceAxisWidth - 1, 20);
+      drawRoundedRectPath(
+        ctx,
+        pillX,
+        layout.timeAxisTop + 3,
+        tw,
+        TIME_AXIS_HEIGHT - 6,
+        3,
+      );
+      ctx.fill();
       ctx.fillStyle = pal.pillText;
-      ctx.font = symbol.precision >= 6
-        ? '600 10px -apple-system, sans-serif'
-        : '600 11px -apple-system, sans-serif';
-      ctx.textAlign = 'left';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(yLabel, layout.plotWidth + 5, cy);
+      ctx.fillText(
+        timeStr,
+        pillX + tw / 2,
+        layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
+      );
     }
 
-    // Bottom Time-Axis Date Pill
-    const hoveredTime = indexToTime(crosshair.barIndex, rawCandles);
-    const timeStr = formatAxisTime(hoveredTime, timeframe, true);
-    ctx.font = '600 11px -apple-system, sans-serif';
-    const tw = ctx.measureText(timeStr).width + 16;
-    const pillX = Math.max(2, Math.min(layout.plotWidth - tw - 2, snapX - tw / 2));
-    ctx.fillStyle = pal.pillBg;
-    drawRoundedRect(ctx, pillX, layout.timeAxisTop + 3, tw, TIME_AXIS_HEIGHT - 6, 3);
-    ctx.fill();
-    ctx.fillStyle = pal.pillText;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(timeStr, pillX + tw / 2, layout.timeAxisTop + TIME_AXIS_HEIGHT / 2);
+    // Iconic TradingView Price Axis Floating `+` Button
+    if (
+      scalesCfg.showPlusButton &&
+      cy >= layout.mainRect.top + 12 &&
+      cy <= layout.mainRect.bottom - 12
+    ) {
+      const plusX =
+        priceScalePosition === 'left'
+          ? layout.plotLeft + 11
+          : layout.plotRight - 11;
+      const plusY = Math.max(
+        layout.mainRect.top + 14,
+        Math.min(layout.mainRect.bottom - 14, cy),
+      );
+      const r = 9;
+      ctx.save();
+      ctx.fillStyle = pal.pillBg;
+      ctx.strokeStyle = pal.axisBorder;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(plusX, plusY, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(plusX - 4, plusY);
+      ctx.lineTo(plusX + 4, plusY);
+      ctx.moveTo(plusX, plusY - 4);
+      ctx.lineTo(plusX, plusY + 4);
+      ctx.stroke();
+      ctx.restore();
+
+      layout.plusButtonRect = {
+        x: plusX,
+        y: plusY,
+        radius: 12,
+        price: yToPrice(plusY, layout),
+      };
+    }
   }
 
   return layout;
-}
-
-function renderSingleDrawing(
-  ctx: CanvasRenderingContext2D,
-  d: DrawingObject,
-  toScreen: (pt: DrawingPoint) => ScreenPoint,
-  layout: ChartLayoutMetrics,
-  candles: readonly Candle[],
-  precision: number,
-  isSelected: boolean,
-) {
-  const pts = d.points.map(toScreen);
-  ctx.save();
-  ctx.strokeStyle = d.style.color;
-  ctx.fillStyle = d.style.color;
-  ctx.lineWidth = d.style.lineWidth || 2;
-  setDash(ctx, d.style.lineStyle);
-
-  switch (d.type) {
-    case 'trendline':
-    case 'arrow': {
-      if (pts.length >= 2) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(pts[1].x, pts[1].y);
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'ray':
-    case 'extendedLine': {
-      if (pts.length >= 2) {
-        const [s, e] = extendLineToBounds(
-          pts[0],
-          pts[1],
-          layout.plotWidth,
-          layout.mainRect.height,
-          d.type === 'ray' ? 'ray' : 'extended',
-        );
-        ctx.beginPath();
-        ctx.moveTo(s.x, s.y);
-        ctx.lineTo(e.x, e.y);
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'horizontalLine': {
-      const y = Math.round(pts[0].y) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(layout.plotWidth, y);
-      ctx.stroke();
-      // Right price tag
-      const lbl = formatPrice(d.points[0].price, precision);
-      ctx.font = '600 10.5px -apple-system, sans-serif';
-      const tw = ctx.measureText(lbl).width + 10;
-      ctx.fillStyle = d.style.color;
-      drawRoundedRect(ctx, layout.plotWidth - tw - 4, y - 9, tw, 18, 3);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(lbl, layout.plotWidth - tw + 1, y);
-      break;
-    }
-
-    case 'verticalLine': {
-      const x = Math.round(pts[0].x) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, layout.mainRect.top);
-      ctx.lineTo(x, layout.mainRect.bottom);
-      ctx.stroke();
-      break;
-    }
-
-    case 'parallelChannel': {
-      if (pts.length >= 2) {
-        const p3 = pts[2] ?? { x: pts[0].x, y: pts[0].y - 40 };
-        const ch = calculateParallelChannel(pts[0], pts[1], p3);
-        ctx.fillStyle = 'rgba(41, 98, 255, 0.12)';
-        ctx.beginPath();
-        ctx.moveTo(ch.baseStart.x, ch.baseStart.y);
-        ctx.lineTo(ch.baseEnd.x, ch.baseEnd.y);
-        ctx.lineTo(ch.offsetEnd.x, ch.offsetEnd.y);
-        ctx.lineTo(ch.offsetStart.x, ch.offsetStart.y);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.moveTo(ch.baseStart.x, ch.baseStart.y);
-        ctx.lineTo(ch.baseEnd.x, ch.baseEnd.y);
-        ctx.moveTo(ch.offsetStart.x, ch.offsetStart.y);
-        ctx.lineTo(ch.offsetEnd.x, ch.offsetEnd.y);
-        ctx.stroke();
-
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(ch.midStart.x, ch.midStart.y);
-        ctx.lineTo(ch.midEnd.x, ch.midEnd.y);
-        ctx.stroke();
-        ctx.restore();
-      }
-      break;
-    }
-
-    case 'fibRetracement': {
-      if (pts.length >= 2) {
-        const minX = Math.min(pts[0].x, pts[1].x);
-        const maxX = Math.max(pts[0].x, pts[1].x);
-        const spanW = Math.max(60, maxX - minX);
-        const levels = calculateFibonacciLevels(
-          d.points[0].price,
-          d.points[1].price,
-          d.fibLevels ?? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1],
-        );
-
-        // Diagonal guide line
-        ctx.save();
-        ctx.strokeStyle = 'rgba(140, 140, 140, 0.5)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(pts[1].x, pts[1].y);
-        ctx.stroke();
-        ctx.restore();
-
-        for (let i = 0; i < levels.length; i++) {
-          const lv = levels[i];
-          const y = priceToY(lv.price, layout);
-          if (i > 0) {
-            const prevY = priceToY(levels[i - 1].price, layout);
-            ctx.fillStyle = `${lv.color}18`;
-            ctx.fillRect(minX, Math.min(prevY, y), spanW, Math.abs(y - prevY));
-          }
-          ctx.strokeStyle = lv.color;
-          ctx.lineWidth = 1.25;
-          ctx.setLineDash([]);
-          ctx.beginPath();
-          ctx.moveTo(minX, y);
-          ctx.lineTo(minX + spanW, y);
-          ctx.stroke();
-
-          ctx.fillStyle = lv.color;
-          ctx.font = '600 10.5px -apple-system, sans-serif';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(
-            `${lv.ratio} (${formatPrice(lv.price, precision)})`,
-            minX + 4,
-            y - 2,
-          );
-        }
-      }
-      break;
-    }
-
-    case 'rectangle': {
-      if (pts.length >= 2) {
-        const rx = Math.min(pts[0].x, pts[1].x);
-        const ry = Math.min(pts[0].y, pts[1].y);
-        const rw = Math.abs(pts[1].x - pts[0].x);
-        const rh = Math.abs(pts[1].y - pts[0].y);
-        ctx.fillStyle = d.style.fillColor ?? `${d.style.color}24`;
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.strokeRect(rx, ry, rw, rh);
-      }
-      break;
-    }
-
-    case 'ellipse': {
-      if (pts.length >= 2) {
-        const cx = (pts[0].x + pts[1].x) / 2;
-        const cy = (pts[0].y + pts[1].y) / 2;
-        const rx = Math.max(1, Math.abs(pts[1].x - pts[0].x) / 2);
-        const ry = Math.max(1, Math.abs(pts[1].y - pts[0].y) / 2);
-        ctx.fillStyle = d.style.fillColor ?? `${d.style.color}24`;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'brush': {
-      if (pts.length >= 2) {
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-      }
-      break;
-    }
-
-    case 'text':
-    case 'callout': {
-      const txt = d.text || 'Nota';
-      ctx.font = `600 ${d.style.fontSize ?? 13}px -apple-system, sans-serif`;
-      const tw = ctx.measureText(txt).width + 14;
-      const th = 24;
-      ctx.fillStyle = 'rgba(19, 19, 19, 0.88)';
-      drawRoundedRect(ctx, pts[0].x, pts[0].y - th, tw, th, 4);
-      ctx.fill();
-      ctx.strokeStyle = d.style.color;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = d.style.color;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(txt, pts[0].x + 7, pts[0].y - th / 2);
-      break;
-    }
-
-    case 'measure': {
-      if (pts.length >= 2) {
-        const m = calculateMeasure(d.points[0], d.points[1], candles);
-        const rx = Math.min(pts[0].x, pts[1].x);
-        const ry = Math.min(pts[0].y, pts[1].y);
-        const rw = Math.abs(pts[1].x - pts[0].x);
-        const rh = Math.abs(pts[1].y - pts[0].y);
-        const col = m.isPositive ? '#2962ff' : '#f23645';
-
-        ctx.fillStyle = m.isPositive
-          ? 'rgba(41, 98, 255, 0.18)'
-          : 'rgba(242, 54, 69, 0.18)';
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 1.2;
-        ctx.strokeRect(rx, ry, rw, rh);
-
-        const sign = m.priceDelta >= 0 ? '+' : '';
-        const line1 = `${sign}${formatPrice(m.priceDelta, precision)} (${sign}${m.percentDelta.toFixed(2)}%)`;
-        const line2 = `${m.bars} barre · ${formatDurationIT(m.timeSpanSeconds)}`;
-        ctx.font = '600 11px -apple-system, sans-serif';
-        const bw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width) + 18;
-        const bh = 36;
-        const bx = Math.max(6, Math.min(layout.plotWidth - bw - 6, rx + rw / 2 - bw / 2));
-        const by = m.isPositive ? Math.max(6, ry - bh - 6) : Math.min(layout.mainRect.bottom - bh - 6, ry + rh + 6);
-        ctx.fillStyle = col;
-        drawRoundedRect(ctx, bx, by, bw, bh, 5);
-        ctx.fill();
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(line1, bx + bw / 2, by + 12);
-        ctx.font = '500 10.5px -apple-system, sans-serif';
-        ctx.fillText(line2, bx + bw / 2, by + 26);
-      }
-      break;
-    }
-
-    case 'longPosition':
-    case 'shortPosition': {
-      if (pts.length >= 2) {
-        const side = d.type === 'longPosition' ? 'long' : 'short';
-        const entry = d.points[0].price;
-        const rawTarget = d.targetPrice ?? d.points[1].price;
-        const diff = Math.abs(rawTarget - entry) || entry * 0.015;
-        const target =
-          side === 'long'
-            ? Math.max(entry + diff * 0.25, rawTarget)
-            : Math.min(entry - diff * 0.25, rawTarget);
-        const stop =
-          d.stopPrice ??
-          (side === 'long' ? entry - diff * 0.5 : entry + diff * 0.5);
-
-        const metrics = calculatePositionMetrics(side, entry, stop, target);
-        const x0 = Math.min(pts[0].x, pts[1].x);
-        const boxW = Math.max(85, Math.abs(pts[1].x - pts[0].x));
-        const yEntry = priceToY(entry, layout);
-        const yTarget = priceToY(target, layout);
-        const yStop = priceToY(stop, layout);
-
-        // Target zone (green)
-        ctx.fillStyle = 'rgba(8, 153, 129, 0.22)';
-        ctx.fillRect(x0, Math.min(yEntry, yTarget), boxW, Math.abs(yTarget - yEntry));
-        ctx.strokeStyle = '#089981';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x0, Math.min(yEntry, yTarget), boxW, Math.abs(yTarget - yEntry));
-
-        // Stop zone (red)
-        ctx.fillStyle = 'rgba(242, 54, 69, 0.22)';
-        ctx.fillRect(x0, Math.min(yEntry, yStop), boxW, Math.abs(yStop - yEntry));
-        ctx.strokeStyle = '#f23645';
-        ctx.strokeRect(x0, Math.min(yEntry, yStop), boxW, Math.abs(yStop - yEntry));
-
-        // Entry midline
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.moveTo(x0, yEntry);
-        ctx.lineTo(x0 + boxW, yEntry);
-        ctx.stroke();
-
-        // R/R Badge
-        const rrText = `${side === 'long' ? 'LONG' : 'SHORT'} · R/R ${metrics.riskRewardRatio.toFixed(2)} (+${metrics.rewardPercent.toFixed(1)}% / -${metrics.riskPercent.toFixed(1)}%)`;
-        ctx.font = '600 10.5px -apple-system, sans-serif';
-        const tw = ctx.measureText(rrText).width + 14;
-        ctx.fillStyle = '#131313';
-        drawRoundedRect(ctx, x0 + 4, yEntry - 10, tw, 20, 4);
-        ctx.fill();
-        ctx.strokeStyle = '#464646';
-        ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(rrText, x0 + 11, yEntry);
-      }
-      break;
-    }
-  }
-
-  // Selected control handles
-  if (isSelected) {
-    ctx.setLineDash([]);
-    for (const pt of pts) {
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = '#2962ff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-  }
-
-  ctx.restore();
 }

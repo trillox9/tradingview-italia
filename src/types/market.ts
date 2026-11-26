@@ -42,14 +42,53 @@ export const TIMEFRAME_LABELS_IT: Record<Timeframe, string> = {
   '1M': '1 mese',
 };
 
-export type ChartType =
-  | 'candles'
-  | 'hollow'
+export type CanonicalChartType =
   | 'bars'
+  | 'candles'
+  | 'hollow_candles'
+  | 'volume_candles'
   | 'line'
+  | 'line_markers'
+  | 'step_line'
   | 'area'
+  | 'hlc_area'
   | 'baseline'
-  | 'heikinAshi';
+  | 'columns'
+  | 'high_low'
+  | 'heikin_ashi';
+
+/** Legacy aliases accepted for seamless migration during Phase 1 -> Phase 2 */
+export type LegacyChartType = 'hollow' | 'heikinAshi';
+
+export type ChartType = CanonicalChartType | LegacyChartType;
+
+export function normalizeChartType(type: ChartType): CanonicalChartType {
+  if (type === 'hollow') return 'hollow_candles';
+  if (type === 'heikinAshi') return 'heikin_ashi';
+  return type;
+}
+
+export interface ChartTypeMeta {
+  id: CanonicalChartType;
+  labelIt: string;
+  group: 'Prezzo' | 'Linea e Area' | 'Avanzati';
+}
+
+export const CHART_TYPES_META: readonly ChartTypeMeta[] = [
+  { id: 'bars', labelIt: 'Barre', group: 'Prezzo' },
+  { id: 'candles', labelIt: 'Candele', group: 'Prezzo' },
+  { id: 'hollow_candles', labelIt: 'Candele vuote', group: 'Prezzo' },
+  { id: 'volume_candles', labelIt: 'Candele con volume', group: 'Prezzo' },
+  { id: 'line', labelIt: 'Linea', group: 'Linea e Area' },
+  { id: 'line_markers', labelIt: 'Linea con marcatori', group: 'Linea e Area' },
+  { id: 'step_line', labelIt: 'Linea a gradini', group: 'Linea e Area' },
+  { id: 'area', labelIt: 'Area', group: 'Linea e Area' },
+  { id: 'hlc_area', labelIt: 'Area HLC', group: 'Linea e Area' },
+  { id: 'baseline', labelIt: 'Baseline', group: 'Linea e Area' },
+  { id: 'columns', labelIt: 'Colonne', group: 'Avanzati' },
+  { id: 'high_low', labelIt: 'Massimo-minimo', group: 'Avanzati' },
+  { id: 'heikin_ashi', labelIt: 'Heikin Ashi', group: 'Avanzati' },
+] as const;
 
 export type MarketStatus = 'open' | 'closed' | 'pre' | 'post' | '24x7';
 

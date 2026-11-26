@@ -1,25 +1,26 @@
-import { Eye, EyeOff, Lock, Plus, Trash2, Unlock } from 'lucide-react';
-import type { PersistableDrawingType } from '../../types';
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Copy,
+  Eye,
+  EyeOff,
+  Lock,
+  Plus,
+  Settings,
+  Trash2,
+  Unlock,
+} from 'lucide-react';
+import {
+  DRAWING_TOOL_REGISTRY,
+  normalizeDrawingTool,
+  type DrawingToolType,
+} from '../../types';
 import { useActivePane, useDrawings, useTradingView } from '../../store';
 
-const DRAWING_TYPE_LABELS_IT: Record<PersistableDrawingType, string> = {
-  trendline: 'Linea di tendenza',
-  ray: 'Semiretta',
-  extendedLine: 'Linea estesa',
-  horizontalLine: 'Linea orizzontale',
-  verticalLine: 'Linea verticale',
-  parallelChannel: 'Canale parallelo',
-  fibRetracement: 'Ritracciamento Fibonacci',
-  rectangle: 'Rettangolo',
-  ellipse: 'Ellisse',
-  brush: 'Pennello',
-  text: 'Testo',
-  callout: 'Fumetto',
-  longPosition: 'Posizione Long',
-  shortPosition: 'Posizione Short',
-  measure: 'Misura',
-  arrow: 'Freccia',
-};
+function getDrawingLabelIt(type: DrawingToolType): string {
+  const canonical = normalizeDrawingTool(type);
+  return DRAWING_TOOL_REGISTRY[canonical]?.labelIt ?? type;
+}
 
 export function ObjectTreePanel() {
   const { openModal, pineAppliedToChart, pineResult, clearPineFromChart } =
@@ -29,6 +30,7 @@ export function ObjectTreePanel() {
     activeSymbol,
     toggleIndicatorVisibility,
     removeIndicator,
+    clearAllObjects,
   } = useActivePane();
   const {
     drawings,
@@ -36,14 +38,34 @@ export function ObjectTreePanel() {
     setSelectedDrawingId,
     updateDrawing,
     deleteDrawing,
+    cloneDrawing,
+    bringToFront,
+    sendToBack,
+    openDrawingSettings,
     clearDrawings,
   } = useDrawings();
+
+  const totalObjects =
+    activePane.indicators.length +
+    (pineAppliedToChart ? 1 : 0) +
+    drawings.length;
 
   return (
     <div className="tv-panel">
       <div className="tv-panel-header">
         <h3 className="tv-panel-title">Albero degli oggetti</h3>
         <div className="tv-panel-actions">
+          {totalObjects > 0 && (
+            <button
+              type="button"
+              className="tv-panel-icon-btn"
+              title="Rimuovi tutti gli indicatori e disegni"
+              aria-label="Rimuovi tutti gli oggetti"
+              onClick={() => clearAllObjects()}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
           <button
             type="button"
             className="tv-panel-icon-btn"
@@ -178,14 +200,13 @@ export function ObjectTreePanel() {
 
           {drawings.length === 0 ? (
             <div style={{ fontSize: 11.5, color: 'var(--tv-text-muted, #707070)' }}>
-              Nessun disegno presente su {activeSymbol.ticker}. Usa la barra sinistra per tracciare linee o Fibonacci.
+              Nessun disegno presente su {activeSymbol.ticker}. Usa la barra sinistra per tracciare linee, Fibonacci o pattern.
             </div>
           ) : (
             drawings.map((drw, idx) => {
               const isSelected = drw.id === selectedDrawingId;
               const label =
-                drw.text?.trim() ||
-                `${DRAWING_TYPE_LABELS_IT[drw.type]} #${idx + 1}`;
+                drw.text?.trim() || `${getDrawingLabelIt(drw.type)} #${idx + 1}`;
               return (
                 <div
                   key={drw.id}
@@ -203,6 +224,7 @@ export function ObjectTreePanel() {
                   <span
                     className="tv-kv-key"
                     style={{ opacity: drw.visible ? 1 : 0.45 }}
+                    title={label}
                   >
                     <span
                       className="tv-color-dot"
@@ -212,9 +234,45 @@ export function ObjectTreePanel() {
                   </span>
 
                   <div
-                    style={{ display: 'flex', alignItems: 'center', gap: 2 }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 1 }}
                     onClick={(e) => e.stopPropagation()}
                   >
+                    <button
+                      type="button"
+                      className="tv-panel-icon-btn"
+                      title="Impostazioni disegno"
+                      aria-label="Impostazioni disegno"
+                      onClick={() => openDrawingSettings(drw.id)}
+                    >
+                      <Settings size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="tv-panel-icon-btn"
+                      title="Clona disegno"
+                      aria-label="Clona disegno"
+                      onClick={() => cloneDrawing(drw.id, activeSymbol.ticker)}
+                    >
+                      <Copy size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="tv-panel-icon-btn"
+                      title="Porta in primo piano"
+                      aria-label="Porta in primo piano"
+                      onClick={() => bringToFront(drw.id, activeSymbol.ticker)}
+                    >
+                      <ArrowUpToLine size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="tv-panel-icon-btn"
+                      title="Porta in secondo piano"
+                      aria-label="Porta in secondo piano"
+                      onClick={() => sendToBack(drw.id, activeSymbol.ticker)}
+                    >
+                      <ArrowDownToLine size={12} />
+                    </button>
                     <button
                       type="button"
                       className="tv-panel-icon-btn"
@@ -225,7 +283,7 @@ export function ObjectTreePanel() {
                         })
                       }
                     >
-                      {drw.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                      {drw.visible ? <Eye size={12} /> : <EyeOff size={12} />}
                     </button>
                     <button
                       type="button"
@@ -237,7 +295,7 @@ export function ObjectTreePanel() {
                         })
                       }
                     >
-                      {drw.locked ? <Lock size={13} /> : <Unlock size={13} />}
+                      {drw.locked ? <Lock size={12} /> : <Unlock size={12} />}
                     </button>
                     <button
                       type="button"
@@ -245,7 +303,7 @@ export function ObjectTreePanel() {
                       title="Elimina disegno"
                       onClick={() => deleteDrawing(activeSymbol.ticker, drw.id)}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={12} />
                     </button>
                   </div>
                 </div>

@@ -1,11 +1,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-// Stylesheet cascade order: base design tokens/reset -> portal -> panels -> supercharts -> modals/standalone pages
+// Stylesheet cascade order: base design tokens/reset -> panels -> supercharts -> drawing tools -> context menus -> modals
 import './styles/global.css';
-import './styles/home.css';
 import './styles/panels.css';
 import './styles/chart.css';
+import './styles/drawingTools.css';
+import './styles/contextMenus.css';
 import './styles/modals.css';
 
 import App from './App';

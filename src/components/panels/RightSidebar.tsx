@@ -1,21 +1,9 @@
 import { useState } from 'react';
-import {
-  BarChart3,
-  Bell,
-  Calendar,
-  Flame,
-  Layers,
-  List,
-  Newspaper,
-  X,
-} from 'lucide-react';
+import { BarChart3, Bell, Layers, List, X } from 'lucide-react';
 import type { Candle } from '../../types';
-import { useTradingView, type RightPanelTab } from '../../store';
+import { useAlerts, useTradingView, type RightPanelTab } from '../../store';
 import { AlertsPanel } from './AlertsPanel';
-import { CalendarPanel } from './CalendarPanel';
 import { DataWindowPanel } from './DataWindowPanel';
-import { HotlistsPanel } from './HotlistsPanel';
-import { NewsPanel } from './NewsPanel';
 import { ObjectTreePanel } from './ObjectTreePanel';
 import { WatchlistPanel } from './WatchlistPanel';
 
@@ -30,7 +18,7 @@ const MIN_WIDTH = 260;
 const MAX_WIDTH = 440;
 const DEFAULT_WIDTH = 304;
 
-const MOBILE_PANEL_TABS: Array<{
+const PANEL_TABS: Array<{
   id: Exclude<RightPanelTab, null>;
   label: string;
   Icon: typeof List;
@@ -38,9 +26,6 @@ const MOBILE_PANEL_TABS: Array<{
   { id: 'watchlist', label: 'Lista', Icon: List },
   { id: 'alerts', label: 'Avvisi', Icon: Bell },
   { id: 'data', label: 'Dati', Icon: BarChart3 },
-  { id: 'hotlists', label: 'Hotlist', Icon: Flame },
-  { id: 'calendar', label: 'Calendario', Icon: Calendar },
-  { id: 'news', label: 'Notizie', Icon: Newspaper },
   { id: 'objectTree', label: 'Oggetti', Icon: Layers },
 ];
 
@@ -49,12 +34,16 @@ export function RightSidebar({
   hoveredCandleIndex,
 }: RightSidebarProps) {
   const { rightPanel, setRightPanel } = useTradingView();
+  const { alerts, triggeredToasts } = useAlerts();
   const [width, setWidth] = useState<number>(DEFAULT_WIDTH);
   const [dragging, setDragging] = useState<boolean>(false);
 
   if (!rightPanel) {
     return null;
   }
+
+  const activeAlertsCount = alerts.filter((a) => a.status === 'active').length;
+  const unreadAlertsCount = triggeredToasts.length;
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -97,11 +86,17 @@ export function RightSidebar({
           onMouseDown={handleMouseDown}
         />
 
-        {/* Compact Panel Switcher + Close Bar (shown on mobile/tablet <= 900px overlay) */}
+        {/* Pure Supercharts Panel Switcher + Close Bar (visible across all viewports) */}
         <div className="tv-right-sidebar-mobile-bar">
           <div className="tv-right-sidebar-mobile-tabs" role="tablist">
-            {MOBILE_PANEL_TABS.map(({ id, label, Icon }) => {
+            {PANEL_TABS.map(({ id, label, Icon }) => {
               const active = rightPanel === id;
+              const badgeCount =
+                id === 'alerts'
+                  ? unreadAlertsCount > 0
+                    ? unreadAlertsCount
+                    : activeAlertsCount
+                  : 0;
               return (
                 <button
                   key={id}
@@ -113,6 +108,9 @@ export function RightSidebar({
                 >
                   <Icon size={13} strokeWidth={1.9} />
                   <span>{label}</span>
+                  {badgeCount > 0 && (
+                    <span className="tv-tab-count">{badgeCount}</span>
+                  )}
                 </button>
               );
             })}
@@ -136,9 +134,6 @@ export function RightSidebar({
             hoveredCandleIndex={hoveredCandleIndex}
           />
         )}
-        {rightPanel === 'hotlists' && <HotlistsPanel />}
-        {rightPanel === 'calendar' && <CalendarPanel />}
-        {rightPanel === 'news' && <NewsPanel />}
         {rightPanel === 'objectTree' && <ObjectTreePanel />}
       </section>
     </>

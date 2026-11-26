@@ -1,15 +1,11 @@
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { ArrowLeft, Moon, Sun } from 'lucide-react';
 import { TradingViewProvider, useActivePane, useTradingView } from './store';
-import { SiteFooter, SiteHeader } from './components/layout';
 import { ModalHost } from './components/modals';
 import { AlertToastStack } from './components/panels';
-import { HomePage } from './pages/HomePage';
-import { MarketsPage } from './pages/MarketsPage';
 import { ChartPage } from './pages/ChartPage';
 import { HeatmapPage } from './pages/HeatmapPage';
 import { ScreenerPage } from './pages/ScreenerPage';
-import { CalendarPage } from './pages/CalendarPage';
-import { CommunityPage } from './pages/CommunityPage';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -95,7 +91,7 @@ class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
               className="tv-btn tv-btn-primary"
               onClick={this.handleReload}
             >
-              Ricarica TradingView Italia
+              Ricarica Supercharts
             </button>
           </div>
         </main>
@@ -106,19 +102,72 @@ class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
   }
 }
 
-function PortalShell({ children }: { children: ReactNode }) {
+/**
+ * Minimal Supercharts utility header shown only when user explicitly opens
+ * `#/screener` or `#/heatmap` directly via hash URL.
+ */
+function ToolViewShell({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  const { navigate, theme, toggleTheme } = useTradingView();
+
   return (
     <div
       style={{
         minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: 'var(--tv-body-bg)',
+        backgroundColor: 'var(--tv-body-bg, #000000)',
+        color: 'var(--tv-text-primary, #d1d4dc)',
       }}
     >
-      <SiteHeader />
-      <div style={{ flex: 1 }}>{children}</div>
-      <SiteFooter />
+      <header
+        style={{
+          height: '38px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 12px',
+          backgroundColor: 'var(--tv-toolbar-bg, #000000)',
+          borderBottom: '1px solid var(--tv-toolbar-border, #303030)',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            type="button"
+            className="tv-btn-sm"
+            onClick={() => navigate('chart')}
+          >
+            <ArrowLeft size={14} />
+            <span>Torna ai Supercharts</span>
+          </button>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--tv-text-heading, #ffffff)',
+            }}
+          >
+            {title}
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="tv-panel-icon-btn"
+          title={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
+          aria-label="Cambia tema"
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
+      </header>
+      <div style={{ flex: 1, minHeight: 0 }}>{children}</div>
     </div>
   );
 }
@@ -127,80 +176,46 @@ function AppRouterShell() {
   const { route } = useTradingView();
   const { activeSymbol } = useActivePane();
 
-  // Reset scroll position when switching top-level views
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.scrollTo(0, 0);
     }
   }, [route.view]);
 
-  // Keep browser tab title synchronized with the active Italian view
   useEffect(() => {
     if (typeof document === 'undefined') return;
     switch (route.view) {
-      case 'chart':
-        document.title = `${activeSymbol.ticker} (${activeSymbol.exchange}) — Supercharts | TradingView`;
-        break;
-      case 'markets':
-        document.title = 'Mercati, ovunque — TradingView Italia';
-        break;
       case 'screener':
-        document.title = 'Screener Azioni, Cripto & Forex — TradingView Italia';
+        document.title = 'Screener Mercati — Supercharts | TradingView';
         break;
       case 'heatmap':
-        document.title = 'Mappa di calore dei mercati — TradingView Italia';
+        document.title = 'Mappa di calore — Supercharts | TradingView';
         break;
-      case 'calendar':
-        document.title = 'Calendario economico — TradingView Italia';
-        break;
-      case 'community':
-        document.title = 'Idee della community e Script — TradingView Italia';
-        break;
-      case 'home':
       default:
-        document.title = 'TradingView — Monitora tutti i mercati';
+        document.title = `${activeSymbol.ticker} (${activeSymbol.exchange}) — Supercharts | TradingView`;
         break;
     }
   }, [route.view, activeSymbol.ticker, activeSymbol.exchange]);
 
+  const isToolSubView = route.view === 'screener' || route.view === 'heatmap';
+
   const renderView = () => {
-    switch (route.view) {
-      case 'home':
-        // HomePage includes its own transparentOverHero SiteHeader & SiteFooter
-        return <HomePage />;
-      case 'markets':
-        // MarketsPage includes its own SiteHeader & SiteFooter
-        return <MarketsPage />;
-      case 'chart':
-        // Full-viewport 100vh Supercharts workspace (includes AlertToastStack)
-        return <ChartPage />;
-      case 'heatmap':
-        return (
-          <PortalShell>
-            <HeatmapPage />
-          </PortalShell>
-        );
-      case 'screener':
-        return (
-          <PortalShell>
-            <ScreenerPage />
-          </PortalShell>
-        );
-      case 'calendar':
-        return (
-          <PortalShell>
-            <CalendarPage />
-          </PortalShell>
-        );
-      case 'community':
-        return (
-          <PortalShell>
-            <CommunityPage />
-          </PortalShell>
-        );
-      default:
-        return <HomePage />;
+    if (route.view === 'screener') {
+      return (
+        <ToolViewShell title="Screener Azioni, Cripto & Forex">
+          <ScreenerPage />
+        </ToolViewShell>
+      );
     }
+    if (route.view === 'heatmap') {
+      return (
+        <ToolViewShell title="Mappa di calore dei mercati">
+          <HeatmapPage />
+        </ToolViewShell>
+      );
+    }
+    // Full-viewport 100vh Supercharts Pro workspace (default for #/, #/chart/..., and all other paths)
+    return <ChartPage />;
   };
 
   return (
@@ -208,8 +223,8 @@ function AppRouterShell() {
       {renderView()}
       {/* Global Modals (Ctrl+K, ?, Indicatori, Confronta, Avvisi, Impostazioni, Istantanea) */}
       <ModalHost />
-      {/* Alert Toasts on non-chart pages (ChartPage mounts AlertToastStack internally) */}
-      {route.view !== 'chart' && <AlertToastStack />}
+      {/* Alert Toasts on standalone tool sub-views (ChartPage mounts AlertToastStack internally) */}
+      {isToolSubView && <AlertToastStack />}
     </>
   );
 }

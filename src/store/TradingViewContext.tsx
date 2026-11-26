@@ -8,20 +8,27 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type {
-  AlertRule,
-  AlertTriggerEvent,
-  Candle,
-  ChartType,
-  DataSourceKind,
-  DrawingObject,
-  DrawingToolType,
-  IndicatorConfig,
-  PaperAccountState,
-  PineExecutionResult,
-  QuoteTick,
-  Timeframe,
-  WatchlistGroup,
+import {
+  getDefaultChartSettings,
+  mergeChartSettings,
+  normalizeDrawingTool,
+  type AlertRule,
+  type AlertTriggerEvent,
+  type Candle,
+  type CanonicalDrawingToolType,
+  type ChartSettings,
+  type ChartSettingsPatch,
+  type ChartType,
+  type DataSourceKind,
+  type DrawingObject,
+  type DrawingToolType,
+  type IndicatorConfig,
+  type PaperAccountState,
+  type PineExecutionResult,
+  type PriceScalePosition,
+  type QuoteTick,
+  type Timeframe,
+  type WatchlistGroup,
 } from '../types';
 import {
   MarketFeed,
@@ -65,12 +72,17 @@ import {
   LAYOUT_PANE_COUNTS,
   addDrawingMutation,
   addSymbolToWatchlistList,
+  bringDrawingToFrontMutation,
   clearDrawingsMutation,
+  cloneDrawingMutation,
   computePaneIndicatorSeries,
   createDefaultPanes,
   deleteDrawingMutation,
   loadPersistedActiveWatchlistId,
+  loadPersistedChartSettings,
   loadPersistedDrawings,
+  loadPersistedFavoriteTools,
+  loadPersistedShowFavoritesBar,
   loadPersistedTheme,
   loadPersistedWatchlists,
   normalizeSymbolTicker,
@@ -78,9 +90,13 @@ import {
   removeSymbolFromWatchlistList,
   resolveSymbolInfo,
   savePersistedActiveWatchlistId,
+  savePersistedChartSettings,
   savePersistedDrawings,
+  savePersistedFavoriteTools,
+  savePersistedShowFavoritesBar,
   savePersistedTheme,
   savePersistedWatchlists,
+  sendDrawingToBackMutation,
   sliceCandlesForReplay,
   undoDrawingMutation,
   updateDrawingMutation,
@@ -90,6 +106,7 @@ import type {
   ActivityLogEntry,
   BottomPanelTab,
   ChartPaneState,
+  HideMode,
   LayoutMode,
   MagnetMode,
   ModalName,
@@ -116,6 +133,50 @@ function quotesMapToRecord(map: Map<string, QuoteTick>): Record<string, QuoteTic
   return out;
 }
 
+function adaptChartSettingsForTheme(
+  current: ChartSettings,
+  prevTheme: ThemeMode,
+  nextTheme: ThemeMode,
+): ChartSettings {
+  if (prevTheme === nextTheme) return current;
+  const prevDefaults = getDefaultChartSettings(prevTheme).canvas;
+  const nextDefaults = getDefaultChartSettings(nextTheme).canvas;
+  return {
+    ...current,
+    canvas: {
+      ...current.canvas,
+      bgColor:
+        current.canvas.bgColor === prevDefaults.bgColor
+          ? nextDefaults.bgColor
+          : current.canvas.bgColor,
+      bgGradientEnd:
+        current.canvas.bgGradientEnd === prevDefaults.bgGradientEnd
+          ? nextDefaults.bgGradientEnd
+          : current.canvas.bgGradientEnd,
+      vertGridColor:
+        current.canvas.vertGridColor === prevDefaults.vertGridColor
+          ? nextDefaults.vertGridColor
+          : current.canvas.vertGridColor,
+      horzGridColor:
+        current.canvas.horzGridColor === prevDefaults.horzGridColor
+          ? nextDefaults.horzGridColor
+          : current.canvas.horzGridColor,
+      crosshairColor:
+        current.canvas.crosshairColor === prevDefaults.crosshairColor
+          ? nextDefaults.crosshairColor
+          : current.canvas.crosshairColor,
+      watermarkColor:
+        current.canvas.watermarkColor === prevDefaults.watermarkColor
+          ? nextDefaults.watermarkColor
+          : current.canvas.watermarkColor,
+      scaleTextColor:
+        current.canvas.scaleTextColor === prevDefaults.scaleTextColor
+          ? nextDefaults.scaleTextColor
+          : current.canvas.scaleTextColor,
+    },
+  };
+}
+
 export interface TradingViewProviderProps {
   children?: ReactNode;
   /** Optional custom MarketFeed instance (handy for testing) */
@@ -135,18 +196,33 @@ export function TradingViewProvider({
   autoStartFeed = true,
   initialRoute,
 }: TradingViewProviderProps) {
-  // ---- Theme ----
+  // ---- Theme & 6-Tab Authentic Chart Settings ----
   const [theme, setThemeState] = useState<ThemeMode>(() => loadPersistedTheme());
+  const themeRef = useRef<ThemeMode>(theme);
+  themeRef.current = theme;
+
+  const [chartSettings, setChartSettingsState] = useState<ChartSettings>(() =>
+    loadPersistedChartSettings(theme),
+  );
+
+  useEffect(() => {
+    savePersistedChartSettings(chartSettings);
+  }, [chartSettings]);
 
   const setTheme = useCallback((next: ThemeMode) => {
+    const prev = themeRef.current;
     setThemeState(next);
     savePersistedTheme(next);
+    if (prev !== next) {
+      setChartSettingsState((curr) => adaptChartSettingsForTheme(curr, prev, next));
+    }
   }, []);
 
   const toggleTheme = useCallback(() => {
     setThemeState((prev) => {
       const next: ThemeMode = prev === 'dark' ? 'light' : 'dark';
       savePersistedTheme(next);
+      setChartSettingsState((curr) => adaptChartSettingsForTheme(curr, prev, next));
       return next;
     });
   }, []);
@@ -169,8 +245,8 @@ export function TradingViewProvider({
       timestamp: Date.now(),
       category: 'system',
       level: 'info',
-      title: 'Workspace TradingView Italia inizializzato',
-      detail: 'Feed di mercato, indicatori e Paper Trading pronti.',
+      title: 'Workspace TradingView Supercharts inizializzato',
+      detail: 'Feed di mercato, indicatori, 64 strumenti di disegno e Paper Trading pronti.',
     },
   ]);
 
@@ -197,6 +273,8 @@ export function TradingViewProvider({
   const [panes, setPanes] = useState<ChartPaneState[]>(() =>
     createDefaultPanes(route.view === 'chart' ? route.symbolId : 'FTSEMIB'),
   );
+  const panesRef = useRef<ChartPaneState[]>(panes);
+  panesRef.current = panes;
 
   const setLayoutMode = useCallback((mode: LayoutMode) => {
     setLayoutModeState(mode);
@@ -243,6 +321,56 @@ export function TradingViewProvider({
     },
     [activePaneIndex, updatePane],
   );
+
+  const updateChartSettings = useCallback(
+    (patch: ChartSettingsPatch) => {
+      setChartSettingsState((prev) => mergeChartSettings(prev, patch));
+
+      // Keep activePane mirror flags seamlessly synchronized with ChartSettings
+      const panePatch: Partial<ChartPaneState> = {};
+      if (patch.scales?.mode !== undefined) {
+        panePatch.scaleMode = patch.scales.mode;
+      }
+      if (patch.scales?.invertScale !== undefined) {
+        panePatch.invertScale = patch.scales.invertScale;
+      }
+      if (patch.scales?.lockPriceToBarRatio !== undefined) {
+        panePatch.lockPriceToBarRatio = patch.scales.lockPriceToBarRatio;
+      }
+      if (patch.scales?.position !== undefined) {
+        panePatch.priceScalePosition = patch.scales.position;
+      }
+      if (patch.scales?.showCountdown !== undefined) {
+        panePatch.countdownVisible = patch.scales.showCountdown;
+      }
+      if (patch.canvas?.gridMode !== undefined) {
+        panePatch.showGrid = patch.canvas.gridMode !== 'none';
+      }
+      if (patch.statusLine?.showBuySellButtons !== undefined) {
+        panePatch.showBuySellButtons = patch.statusLine.showBuySellButtons;
+      } else if (patch.trading?.showBuySellButtons !== undefined) {
+        panePatch.showBuySellButtons = patch.trading.showBuySellButtons;
+      }
+      if (Object.keys(panePatch).length > 0) {
+        updatePane(activePaneIndex, panePatch);
+      }
+    },
+    [activePaneIndex, updatePane],
+  );
+
+  const resetChartSettings = useCallback(() => {
+    const fresh = getDefaultChartSettings(themeRef.current);
+    setChartSettingsState(fresh);
+    updatePane(activePaneIndex, {
+      scaleMode: fresh.scales.mode,
+      invertScale: fresh.scales.invertScale,
+      lockPriceToBarRatio: fresh.scales.lockPriceToBarRatio,
+      priceScalePosition: fresh.scales.position,
+      showGrid: fresh.canvas.gridMode !== 'none',
+      countdownVisible: fresh.scales.showCountdown,
+      showBuySellButtons: fresh.statusLine.showBuySellButtons,
+    });
+  }, [activePaneIndex, updatePane]);
 
   // ---- Replay State ----
   const [replay, setReplay] = useState<ReplayState>(INITIAL_REPLAY_STATE);
@@ -416,7 +544,13 @@ export function TradingViewProvider({
 
   const setScaleMode = useCallback(
     (scaleMode: ScaleMode, paneIndex?: number) => {
-      updatePane(paneIndex ?? activePaneIndex, { scaleMode });
+      const targetIdx = paneIndex ?? activePaneIndex;
+      updatePane(targetIdx, { scaleMode });
+      if (targetIdx === activePaneIndex) {
+        setChartSettingsState((prev) =>
+          mergeChartSettings(prev, { scales: { mode: scaleMode } }),
+        );
+      }
     },
     [activePaneIndex, updatePane],
   );
@@ -427,6 +561,47 @@ export function TradingViewProvider({
         ...prev,
         autoScale: !prev.autoScale,
       }));
+    },
+    [activePaneIndex, updatePane],
+  );
+
+  const toggleInvertScale = useCallback(
+    (paneIndex?: number) => {
+      const targetIdx = paneIndex ?? activePaneIndex;
+      const nextVal = !(panesRef.current[targetIdx]?.invertScale ?? false);
+      updatePane(targetIdx, { invertScale: nextVal });
+      if (targetIdx === activePaneIndex) {
+        setChartSettingsState((prev) =>
+          mergeChartSettings(prev, { scales: { invertScale: nextVal } }),
+        );
+      }
+    },
+    [activePaneIndex, updatePane],
+  );
+
+  const toggleLockPriceToBarRatio = useCallback(
+    (paneIndex?: number) => {
+      const targetIdx = paneIndex ?? activePaneIndex;
+      const nextVal = !(panesRef.current[targetIdx]?.lockPriceToBarRatio ?? false);
+      updatePane(targetIdx, { lockPriceToBarRatio: nextVal });
+      if (targetIdx === activePaneIndex) {
+        setChartSettingsState((prev) =>
+          mergeChartSettings(prev, { scales: { lockPriceToBarRatio: nextVal } }),
+        );
+      }
+    },
+    [activePaneIndex, updatePane],
+  );
+
+  const setPriceScalePosition = useCallback(
+    (position: PriceScalePosition, paneIndex?: number) => {
+      const targetIdx = paneIndex ?? activePaneIndex;
+      updatePane(targetIdx, { priceScalePosition: position });
+      if (targetIdx === activePaneIndex) {
+        setChartSettingsState((prev) =>
+          mergeChartSettings(prev, { scales: { position } }),
+        );
+      }
     },
     [activePaneIndex, updatePane],
   );
@@ -521,7 +696,6 @@ export function TradingViewProvider({
       if (needsLiveFetch) {
         setPaneLoading((prev) => ({ ...prev, [activePaneIndex]: true }));
 
-        // Fast-path: if snapshot wasn't loaded yet, hydrate real daily/weekly/monthly snapshot immediately while live Yahoo resolves
         if (symInfo.yahooSymbol && !cached) {
           void loadRealSnapshot().then(() => {
             if (cancelled) return;
@@ -559,7 +733,6 @@ export function TradingViewProvider({
           });
       }
 
-      // Periodically refresh live Yahoo quote (~30s) for active non-crypto instrument
       if (symInfo.yahooSymbol) {
         yahooRefreshTimer = setInterval(() => {
           void fetchYahooChart(symInfo, activePane.timeframe, true).then((res) => {
@@ -670,21 +843,84 @@ export function TradingViewProvider({
     return () => clearInterval(id);
   }, [replay.active, replay.playing, replay.speedMs, stepReplay]);
 
-  // ---- Drawings State ----
+  // ---- Drawings State & Pro Drawing Controls ----
   const [drawingsBundle, setDrawingsBundle] = useState<DrawingsBundle>(() => ({
     drawingsBySymbol: loadPersistedDrawings(),
     historyBySymbol: {},
   }));
+  const drawingsBundleRef = useRef<DrawingsBundle>(drawingsBundle);
+  drawingsBundleRef.current = drawingsBundle;
+
   const [activeTool, setActiveTool] = useState<DrawingToolType>('crosshair');
+  const [favoriteTools, setFavoriteTools] = useState<CanonicalDrawingToolType[]>(
+    () => loadPersistedFavoriteTools(),
+  );
+  const [showFavoritesBar, setShowFavoritesBarState] = useState<boolean>(() =>
+    loadPersistedShowFavoritesBar(),
+  );
   const [magnetMode, setMagnetMode] = useState<MagnetMode>('off');
   const [stayInDrawingMode, setStayInDrawingMode] = useState<boolean>(false);
   const [lockDrawings, setLockDrawings] = useState<boolean>(false);
-  const [hideDrawings, setHideDrawings] = useState<boolean>(false);
+  const [hideMode, setHideModeState] = useState<HideMode>('none');
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [selectedDrawingSettingsId, setSelectedDrawingSettingsId] = useState<
+    string | null
+  >(null);
+  const [selectedDrawingSettingsOpen, setSelectedDrawingSettingsOpen] =
+    useState<boolean>(false);
 
   useEffect(() => {
     savePersistedDrawings(drawingsBundle.drawingsBySymbol);
   }, [drawingsBundle.drawingsBySymbol]);
+
+  useEffect(() => {
+    savePersistedFavoriteTools(favoriteTools);
+  }, [favoriteTools]);
+
+  useEffect(() => {
+    savePersistedShowFavoritesBar(showFavoritesBar);
+  }, [showFavoritesBar]);
+
+  const hideDrawings = hideMode === 'drawings' || hideMode === 'all';
+
+  const setHideMode = useCallback((mode: HideMode) => {
+    setHideModeState(mode);
+  }, []);
+
+  const setHideDrawings = useCallback((hidden: boolean) => {
+    setHideModeState((prev) => {
+      if (hidden) {
+        return prev === 'all' ? 'all' : 'drawings';
+      }
+      return prev === 'drawings' || prev === 'all' ? 'none' : prev;
+    });
+  }, []);
+
+  const toggleFavoriteTool = useCallback((tool: DrawingToolType) => {
+    const norm = normalizeDrawingTool(tool);
+    setFavoriteTools((prev) =>
+      prev.includes(norm) ? prev.filter((t) => t !== norm) : [...prev, norm],
+    );
+  }, []);
+
+  const setShowFavoritesBar = useCallback((visible: boolean) => {
+    setShowFavoritesBarState(visible);
+  }, []);
+
+  const toggleFavoritesBar = useCallback(() => {
+    setShowFavoritesBarState((prev) => !prev);
+  }, []);
+
+  const openDrawingSettings = useCallback((id: string) => {
+    setSelectedDrawingId(id);
+    setSelectedDrawingSettingsId(id);
+    setSelectedDrawingSettingsOpen(true);
+  }, []);
+
+  const closeDrawingSettings = useCallback(() => {
+    setSelectedDrawingSettingsOpen(false);
+    setSelectedDrawingSettingsId(null);
+  }, []);
 
   const activeDrawings = useMemo(
     () => drawingsBundle.drawingsBySymbol[activePane.symbolId] ?? [],
@@ -718,13 +954,57 @@ export function TradingViewProvider({
   const deleteDrawing = useCallback((symbol: string, drawingId: string) => {
     setDrawingsBundle((prev) => deleteDrawingMutation(prev, symbol, drawingId));
     setSelectedDrawingId((prev) => (prev === drawingId ? null : prev));
+    setSelectedDrawingSettingsId((prev) => {
+      if (prev === drawingId) {
+        setSelectedDrawingSettingsOpen(false);
+        return null;
+      }
+      return prev;
+    });
   }, []);
+
+  const cloneDrawing = useCallback(
+    (id: string, symbol?: string): DrawingObject | null => {
+      const targetSym = symbol ?? activePane.symbolId;
+      const result = cloneDrawingMutation(drawingsBundleRef.current, targetSym, id);
+      if (!result.cloned) return null;
+      drawingsBundleRef.current = result.bundle;
+      setDrawingsBundle(result.bundle);
+      setSelectedDrawingId(result.cloned.id);
+      appendLog({
+        category: 'drawing',
+        level: 'info',
+        title: `Disegno clonato su ${normalizeSymbolTicker(targetSym)}`,
+        symbol: normalizeSymbolTicker(targetSym),
+      });
+      return result.cloned;
+    },
+    [activePane.symbolId, appendLog],
+  );
+
+  const bringToFront = useCallback(
+    (id: string, symbol?: string) => {
+      const targetSym = symbol ?? activePane.symbolId;
+      setDrawingsBundle((prev) => bringDrawingToFrontMutation(prev, targetSym, id));
+    },
+    [activePane.symbolId],
+  );
+
+  const sendToBack = useCallback(
+    (id: string, symbol?: string) => {
+      const targetSym = symbol ?? activePane.symbolId;
+      setDrawingsBundle((prev) => sendDrawingToBackMutation(prev, targetSym, id));
+    },
+    [activePane.symbolId],
+  );
 
   const clearDrawings = useCallback(
     (symbol?: string) => {
       const target = symbol ?? activePane.symbolId;
       setDrawingsBundle((prev) => clearDrawingsMutation(prev, target));
       setSelectedDrawingId(null);
+      setSelectedDrawingSettingsId(null);
+      setSelectedDrawingSettingsOpen(false);
     },
     [activePane.symbolId],
   );
@@ -926,7 +1206,6 @@ export function TradingViewProvider({
       const nextRecord = quotesMapToRecord(quotesMap);
       setQuotes(nextRecord);
 
-      // Evaluate active alerts for changed symbols
       const currentAlerts = alertsRef.current;
       const hasActiveAlerts = currentAlerts.some((a) => a.status === 'active');
       if (hasActiveAlerts) {
@@ -969,13 +1248,11 @@ export function TradingViewProvider({
         }
       }
 
-      // Update previous price snapshot
       for (const ticker of changedTickers) {
         const tick = nextRecord[ticker];
         if (tick) prevPricesRef.current[ticker] = tick.price;
       }
 
-      // Mark-to-market open Paper Trading positions & resting orders
       const acc = paperAccountRef.current;
       if (acc.positions.length > 0 || acc.orders.length > 0) {
         const priceLookup: Record<string, number> = {};
@@ -1096,7 +1373,6 @@ export function TradingViewProvider({
   );
   const [pineAppliedToChart, setPineAppliedToChart] = useState<boolean>(false);
 
-  // Re-evaluate Pine automatically when symbol/timeframe/replay candle series changes if applied
   useEffect(() => {
     if (!pineAppliedToChart) return;
     setPineResult(evaluatePineScript(pineCode, displayedCandles));
@@ -1137,6 +1413,27 @@ export function TradingViewProvider({
     setPineAppliedToChart(false);
   }, []);
 
+  const clearIndicators = useCallback(
+    (paneIndex?: number) => {
+      const targetIdx = paneIndex ?? activePaneIndex;
+      updatePane(targetIdx, { indicators: [] });
+      if (targetIdx === activePaneIndex) {
+        setPineAppliedToChart(false);
+      }
+    },
+    [activePaneIndex, updatePane],
+  );
+
+  const clearAllObjects = useCallback(
+    (paneIndex?: number) => {
+      const targetIdx = paneIndex ?? activePaneIndex;
+      const targetSym = panesRef.current[targetIdx]?.symbolId ?? activePane.symbolId;
+      clearDrawings(targetSym);
+      clearIndicators(targetIdx);
+    },
+    [activePane.symbolId, activePaneIndex, clearDrawings, clearIndicators],
+  );
+
   const loadPineTemplate = useCallback(
     (templateId: string) => {
       const tpl = PINE_TEMPLATES.find((t) => t.id === templateId);
@@ -1151,12 +1448,20 @@ export function TradingViewProvider({
   // ---- Derived Indicator Series & Technical Summary ----
   const indicatorSeries = useMemo(
     () =>
-      computePaneIndicatorSeries(
-        displayedCandles,
-        activePane.indicators,
-        pineAppliedToChart ? pineResult : null,
-      ),
-    [displayedCandles, activePane.indicators, pineAppliedToChart, pineResult],
+      hideMode === 'indicators' || hideMode === 'all'
+        ? []
+        : computePaneIndicatorSeries(
+            displayedCandles,
+            activePane.indicators,
+            pineAppliedToChart ? pineResult : null,
+          ),
+    [
+      displayedCandles,
+      activePane.indicators,
+      pineAppliedToChart,
+      pineResult,
+      hideMode,
+    ],
   );
 
   const technicalSummary = useMemo(
@@ -1165,11 +1470,8 @@ export function TradingViewProvider({
   );
 
   // ---- Workspace UI Panels & Modals ----
-  const [rightPanel, setRightPanel] = useState<RightPanelTab>(() =>
-    typeof window !== 'undefined' && window.innerWidth <= 900
-      ? null
-      : 'watchlist',
-  );
+  // Supercharts Pro: right sidebar starts collapsed (null) on all viewports for maximum canvas area
+  const [rightPanel, setRightPanel] = useState<RightPanelTab>(null);
   const [bottomPanel, setBottomPanel] = useState<BottomPanelTab>(null);
   const [bottomPanelExpanded, setBottomPanelExpanded] = useState<boolean>(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(280);
@@ -1203,7 +1505,6 @@ export function TradingViewProvider({
     setModals(INITIAL_MODAL_STATE);
   }, []);
 
-  // Automatically close any open modal when navigating between views
   useEffect(() => {
     setModals(INITIAL_MODAL_STATE);
   }, [route.view]);
@@ -1224,6 +1525,9 @@ export function TradingViewProvider({
       theme,
       setTheme,
       toggleTheme,
+      chartSettings,
+      updateChartSettings,
+      resetChartSettings,
       route,
       navigate,
       openSymbolInChart,
@@ -1250,11 +1554,16 @@ export function TradingViewProvider({
       addIndicator,
       updateIndicator,
       removeIndicator,
+      clearIndicators,
+      clearAllObjects,
       toggleIndicatorVisibility,
       addCompareSymbol,
       removeCompareSymbol,
       setScaleMode,
       toggleAutoScale,
+      toggleInvertScale,
+      toggleLockPriceToBarRatio,
+      setPriceScalePosition,
       setRangePreset,
       replay,
       startReplay,
@@ -1268,21 +1577,35 @@ export function TradingViewProvider({
       activeDrawings,
       activeTool,
       setActiveTool,
+      favoriteTools,
+      toggleFavoriteTool,
+      showFavoritesBar,
+      setShowFavoritesBar,
+      toggleFavoritesBar,
       magnetMode,
       setMagnetMode,
       stayInDrawingMode,
       setStayInDrawingMode,
       lockDrawings,
       setLockDrawings,
+      hideMode,
+      setHideMode,
       hideDrawings,
       setHideDrawings,
       selectedDrawingId,
       setSelectedDrawingId,
+      selectedDrawingSettingsId,
+      selectedDrawingSettingsOpen,
+      openDrawingSettings,
+      closeDrawingSettings,
       canUndoDrawing,
       canRedoDrawing,
       addDrawing,
       updateDrawing,
       deleteDrawing,
+      cloneDrawing,
+      bringToFront,
+      sendToBack,
       clearDrawings,
       undoDrawing,
       redoDrawing,
@@ -1339,6 +1662,9 @@ export function TradingViewProvider({
       theme,
       setTheme,
       toggleTheme,
+      chartSettings,
+      updateChartSettings,
+      resetChartSettings,
       route,
       navigate,
       openSymbolInChart,
@@ -1365,11 +1691,16 @@ export function TradingViewProvider({
       addIndicator,
       updateIndicator,
       removeIndicator,
+      clearIndicators,
+      clearAllObjects,
       toggleIndicatorVisibility,
       addCompareSymbol,
       removeCompareSymbol,
       setScaleMode,
       toggleAutoScale,
+      toggleInvertScale,
+      toggleLockPriceToBarRatio,
+      setPriceScalePosition,
       setRangePreset,
       replay,
       startReplay,
@@ -1382,16 +1713,31 @@ export function TradingViewProvider({
       drawingsBundle.drawingsBySymbol,
       activeDrawings,
       activeTool,
+      favoriteTools,
+      toggleFavoriteTool,
+      showFavoritesBar,
+      setShowFavoritesBar,
+      toggleFavoritesBar,
       magnetMode,
       stayInDrawingMode,
       lockDrawings,
+      hideMode,
+      setHideMode,
       hideDrawings,
+      setHideDrawings,
       selectedDrawingId,
+      selectedDrawingSettingsId,
+      selectedDrawingSettingsOpen,
+      openDrawingSettings,
+      closeDrawingSettings,
       canUndoDrawing,
       canRedoDrawing,
       addDrawing,
       updateDrawing,
       deleteDrawing,
+      cloneDrawing,
+      bringToFront,
+      sendToBack,
       clearDrawings,
       undoDrawing,
       redoDrawing,
@@ -1483,7 +1829,7 @@ export function useTradingView(): TradingViewContextValue {
   );
 }
 
-/** Scoped hook for the active chart pane, multi-chart layout, series, indicators & replay */
+/** Scoped hook for the active chart pane, chart settings, multi-chart layout, series, indicators & replay */
 export function useActivePane() {
   const ctx = useRequiredState();
   return useMemo(
@@ -1497,6 +1843,9 @@ export function useActivePane() {
       activePane: ctx.activePane,
       symbol: ctx.activeSymbol,
       activeSymbol: ctx.activeSymbol,
+      chartSettings: ctx.chartSettings,
+      updateChartSettings: ctx.updateChartSettings,
+      resetChartSettings: ctx.resetChartSettings,
       candles: ctx.candles,
       displayedCandles: ctx.displayedCandles,
       paneDataSources: ctx.paneDataSources,
@@ -1513,11 +1862,16 @@ export function useActivePane() {
       addIndicator: ctx.addIndicator,
       updateIndicator: ctx.updateIndicator,
       removeIndicator: ctx.removeIndicator,
+      clearIndicators: ctx.clearIndicators,
+      clearAllObjects: ctx.clearAllObjects,
       toggleIndicatorVisibility: ctx.toggleIndicatorVisibility,
       addCompareSymbol: ctx.addCompareSymbol,
       removeCompareSymbol: ctx.removeCompareSymbol,
       setScaleMode: ctx.setScaleMode,
       toggleAutoScale: ctx.toggleAutoScale,
+      toggleInvertScale: ctx.toggleInvertScale,
+      toggleLockPriceToBarRatio: ctx.toggleLockPriceToBarRatio,
+      setPriceScalePosition: ctx.setPriceScalePosition,
       setRangePreset: ctx.setRangePreset,
       replay: ctx.replay,
       startReplay: ctx.startReplay,
@@ -1536,6 +1890,9 @@ export function useActivePane() {
       ctx.panes,
       ctx.activePane,
       ctx.activeSymbol,
+      ctx.chartSettings,
+      ctx.updateChartSettings,
+      ctx.resetChartSettings,
       ctx.candles,
       ctx.displayedCandles,
       ctx.paneDataSources,
@@ -1552,11 +1909,16 @@ export function useActivePane() {
       ctx.addIndicator,
       ctx.updateIndicator,
       ctx.removeIndicator,
+      ctx.clearIndicators,
+      ctx.clearAllObjects,
       ctx.toggleIndicatorVisibility,
       ctx.addCompareSymbol,
       ctx.removeCompareSymbol,
       ctx.setScaleMode,
       ctx.toggleAutoScale,
+      ctx.toggleInvertScale,
+      ctx.toggleLockPriceToBarRatio,
+      ctx.setPriceScalePosition,
       ctx.setRangePreset,
       ctx.replay,
       ctx.startReplay,
@@ -1570,7 +1932,7 @@ export function useActivePane() {
   );
 }
 
-/** Scoped hook for per-symbol chart drawings, active tool, magnet/lock/hide toggles & undo/redo */
+/** Scoped hook for per-symbol chart drawings, active tool, favorites, z-order, hide modes & undo/redo */
 export function useDrawings() {
   const ctx = useRequiredState();
   return useMemo(
@@ -1579,22 +1941,38 @@ export function useDrawings() {
       drawingsBySymbol: ctx.drawingsBySymbol,
       activeTool: ctx.activeTool,
       setActiveTool: ctx.setActiveTool,
+      favoriteTools: ctx.favoriteTools,
+      toggleFavoriteTool: ctx.toggleFavoriteTool,
+      showFavoritesBar: ctx.showFavoritesBar,
+      setShowFavoritesBar: ctx.setShowFavoritesBar,
+      toggleFavoritesBar: ctx.toggleFavoritesBar,
       magnetMode: ctx.magnetMode,
       setMagnetMode: ctx.setMagnetMode,
       stayInDrawingMode: ctx.stayInDrawingMode,
       setStayInDrawingMode: ctx.setStayInDrawingMode,
       lockDrawings: ctx.lockDrawings,
       setLockDrawings: ctx.setLockDrawings,
+      hideMode: ctx.hideMode,
+      setHideMode: ctx.setHideMode,
       hideDrawings: ctx.hideDrawings,
       setHideDrawings: ctx.setHideDrawings,
       selectedDrawingId: ctx.selectedDrawingId,
       setSelectedDrawingId: ctx.setSelectedDrawingId,
+      selectedDrawingSettingsId: ctx.selectedDrawingSettingsId,
+      selectedDrawingSettingsOpen: ctx.selectedDrawingSettingsOpen,
+      openDrawingSettings: ctx.openDrawingSettings,
+      closeDrawingSettings: ctx.closeDrawingSettings,
       canUndo: ctx.canUndoDrawing,
       canRedo: ctx.canRedoDrawing,
       addDrawing: ctx.addDrawing,
       updateDrawing: ctx.updateDrawing,
       deleteDrawing: ctx.deleteDrawing,
+      cloneDrawing: ctx.cloneDrawing,
+      bringToFront: ctx.bringToFront,
+      sendToBack: ctx.sendToBack,
       clearDrawings: ctx.clearDrawings,
+      clearIndicators: ctx.clearIndicators,
+      clearAllObjects: ctx.clearAllObjects,
       undo: ctx.undoDrawing,
       redo: ctx.redoDrawing,
     }),
@@ -1603,22 +1981,38 @@ export function useDrawings() {
       ctx.drawingsBySymbol,
       ctx.activeTool,
       ctx.setActiveTool,
+      ctx.favoriteTools,
+      ctx.toggleFavoriteTool,
+      ctx.showFavoritesBar,
+      ctx.setShowFavoritesBar,
+      ctx.toggleFavoritesBar,
       ctx.magnetMode,
       ctx.setMagnetMode,
       ctx.stayInDrawingMode,
       ctx.setStayInDrawingMode,
       ctx.lockDrawings,
       ctx.setLockDrawings,
+      ctx.hideMode,
+      ctx.setHideMode,
       ctx.hideDrawings,
       ctx.setHideDrawings,
       ctx.selectedDrawingId,
       ctx.setSelectedDrawingId,
+      ctx.selectedDrawingSettingsId,
+      ctx.selectedDrawingSettingsOpen,
+      ctx.openDrawingSettings,
+      ctx.closeDrawingSettings,
       ctx.canUndoDrawing,
       ctx.canRedoDrawing,
       ctx.addDrawing,
       ctx.updateDrawing,
       ctx.deleteDrawing,
+      ctx.cloneDrawing,
+      ctx.bringToFront,
+      ctx.sendToBack,
       ctx.clearDrawings,
+      ctx.clearIndicators,
+      ctx.clearAllObjects,
       ctx.undoDrawing,
       ctx.redoDrawing,
     ],

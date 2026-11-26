@@ -1,11 +1,11 @@
 import { getSymbolById, getSymbolByTicker } from '../data';
 
 export type AppView =
-  | 'home'
   | 'chart'
-  | 'markets'
   | 'screener'
   | 'heatmap'
+  | 'home'
+  | 'markets'
   | 'calendar'
   | 'community';
 
@@ -16,11 +16,11 @@ export interface AppRoute {
 }
 
 const VALID_VIEWS = new Set<AppView>([
-  'home',
   'chart',
-  'markets',
   'screener',
   'heatmap',
+  'home',
+  'markets',
   'calendar',
   'community',
 ]);
@@ -39,8 +39,10 @@ function normalizeSymbolSegment(raw?: string): string | undefined {
 }
 
 /**
- * Parses a URL hash (e.g. `#/chart/FTSEMIB`, `#/chart/MIL:RACE`, `#/screener`, `#/`)
- * or path string into a typed `AppRoute`.
+ * Supercharts-first router:
+ * - `#/`, `#`, `""`, or `#/chart` -> `{ view: 'chart' }`
+ * - `#/chart/FTSEMIB`, `#/chart/MIL:RACE`, `#/chart/BTCUSDT` -> `{ view: 'chart', symbolId }`
+ * - Explicit `#/screener` or `#/heatmap` routes still work cleanly when typed directly.
  */
 export function parseRoute(hashOrPath?: string): AppRoute {
   const source =
@@ -56,15 +58,20 @@ export function parseRoute(hashOrPath?: string): AppRoute {
     .replace(/^\/+/, '')
     .replace(/\/+$/, '');
 
-  if (!cleaned || cleaned === 'home') {
-    return { view: 'home' };
+  if (!cleaned) {
+    return { view: 'chart' };
   }
 
   const [first, ...rest] = cleaned.split('/');
   const viewCandidate = first.toLowerCase() as AppView;
 
   if (!VALID_VIEWS.has(viewCandidate)) {
-    return { view: 'home' };
+    // Allow shorthand `#/BTCUSDT` or `#/MIL:RACE` directly into Supercharts if recognized
+    const directSym = getSymbolById(cleaned) ?? getSymbolByTicker(cleaned);
+    if (directSym) {
+      return { view: 'chart', symbolId: directSym.ticker };
+    }
+    return { view: 'chart' };
   }
 
   if (viewCandidate === 'chart') {
@@ -80,16 +87,15 @@ export function parseRoute(hashOrPath?: string): AppRoute {
  * Formats a typed view + optional symbolId into a canonical URL hash string.
  */
 export function buildRouteHash(view: AppView, symbolId?: string): string {
-  if (view === 'home') return '#/';
   if (view === 'chart') {
     const normalized = normalizeSymbolSegment(symbolId);
-    if (!normalized) return '#/chart';
-    // Preserve ':' and '!' cleanly for readable TradingView-style hashes like #/chart/MIL:RACE or #/chart/GC1!
+    if (!normalized) return '#/';
     const safeSegment = encodeURIComponent(normalized)
       .replace(/%3A/gi, ':')
-      .replace(/%21/gi, '!');
+      .replace(/%21/g, '!');
     return `#/chart/${safeSegment}`;
   }
+  if (view === 'home') return '#/home';
   return `#/${view}`;
 }
 

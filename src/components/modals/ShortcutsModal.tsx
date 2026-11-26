@@ -19,12 +19,41 @@ interface ShortcutGroup {
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
-    title: 'Ricerca e Navigazione',
+    title: 'Zoom, Assi e Gestures',
+    items: [
+      { keys: ['Rotella su Asse Prezzi'], label: 'Zoom verticale (disattiva Auto)' },
+      { keys: ['Rotella su Asse Tempo'], label: 'Zoom orizzontale' },
+      { keys: ['Doppio clic Asse'], label: 'Ripristina scala automatica (Auto)' },
+      { keys: ['Alt', 'R'], label: 'Reset vista grafico' },
+      { keys: ['Alt', 'I'], label: 'Inverti scala prezzi' },
+      { keys: ['Alt', 'L'], label: 'Scala logaritmica' },
+      { keys: ['Alt', 'P'], label: 'Scala percentuale (%)' },
+    ],
+  },
+  {
+    title: 'Strumenti di Disegno',
+    items: [
+      { keys: ['Alt', 'T'], label: 'Linea di tendenza (Trendline)' },
+      { keys: ['Alt', 'H'], label: 'Linea orizzontale' },
+      { keys: ['Alt', 'V'], label: 'Linea verticale' },
+      { keys: ['Alt', 'J'], label: 'Semiretta orizzontale' },
+      { keys: ['Alt', 'C'], label: 'Linea a croce (Cross Line)' },
+      { keys: ['Alt', 'F'], label: 'Ritracciamento di Fibonacci' },
+      { keys: ['Ctrl', 'Z'], label: 'Annulla ultimo disegno' },
+      { keys: ['Ctrl', 'Y'], label: 'Ripeti disegno annullato' },
+      { keys: ['Delete'], label: 'Elimina disegno selezionato' },
+    ],
+  },
+  {
+    title: 'Ricerca, Avvisi e Azioni',
     items: [
       { keys: ['Ctrl', 'K'], label: 'Ricerca simboli globale' },
       { keys: ['/'], label: 'Cerca simbolo rapido' },
       { keys: ['?'], label: 'Apri scorciatoie da tastiera' },
       { keys: ['Esc'], label: 'Mirino / Chiudi finestra' },
+      { keys: ['Alt', 'A'], label: 'Crea nuovo avviso sul simbolo' },
+      { keys: ['Alt', 'S'], label: 'Istantanea del grafico (PNG)' },
+      { keys: ['↑', '↓'], label: 'Naviga risultati ricerca' },
     ],
   },
   {
@@ -38,25 +67,6 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ['6'], label: 'Timeframe 1 giorno (1D)' },
       { keys: ['7'], label: 'Timeframe 1 settimana (1W)' },
       { keys: ['8'], label: 'Timeframe 1 mese (1M)' },
-    ],
-  },
-  {
-    title: 'Strumenti di Disegno',
-    items: [
-      { keys: ['Alt', 'T'], label: 'Linea di tendenza (Trendline)' },
-      { keys: ['Alt', 'H'], label: 'Linea orizzontale' },
-      { keys: ['Alt', 'F'], label: 'Ritracciamento di Fibonacci' },
-      { keys: ['Ctrl', 'Z'], label: 'Annulla ultimo disegno' },
-      { keys: ['Ctrl', 'Y'], label: 'Ripeti disegno annullato' },
-    ],
-  },
-  {
-    title: 'Azioni e Vista Grafico',
-    items: [
-      { keys: ['Alt', 'R'], label: 'Reset vista grafico' },
-      { keys: ['Alt', 'A'], label: 'Crea nuovo avviso sul simbolo' },
-      { keys: ['Alt', 'S'], label: 'Istantanea del grafico (PNG)' },
-      { keys: ['↑', '↓'], label: 'Naviga risultati ricerca' },
     ],
   },
 ];
@@ -103,7 +113,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             <div>
               <h2 className="tvm-title">Scorciatoie da tastiera</h2>
               <div className="tvm-subtitle">
-                Velocizza la navigazione e l’analisi tecnica su Supercharts
+                Gestures assi, strumenti di disegno e comandi rapidi Supercharts
               </div>
             </div>
           </div>
@@ -125,7 +135,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
               className="tvm-search-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filtra scorciatoie (es. Trendline, Timeframe, Fibonacci)..."
+              placeholder="Filtra scorciatoie (es. Trendline, Scala, Rotella, Fibonacci)..."
               autoFocus
             />
             {query && (

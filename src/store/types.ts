@@ -2,6 +2,10 @@ import type {
   AlertRule,
   AlertTriggerEvent,
   Candle,
+  CanonicalDrawingToolType,
+  ChartScaleMode,
+  ChartSettings,
+  ChartSettingsPatch,
   ChartType,
   DataSourceKind,
   DrawingObject,
@@ -10,6 +14,7 @@ import type {
   IndicatorSeries,
   PaperAccountState,
   PineExecutionResult,
+  PriceScalePosition,
   QuoteTick,
   SymbolInfo,
   TechnicalSummary,
@@ -21,7 +26,7 @@ import type { AppRoute, AppView } from './router';
 
 export type ThemeMode = 'dark' | 'light';
 export type LayoutMode = '1' | '2h' | '2v' | '4';
-export type ScaleMode = 'regular' | 'log' | 'percent';
+export type ScaleMode = ChartScaleMode;
 export type RangePreset =
   | '1D'
   | '5D'
@@ -33,14 +38,12 @@ export type RangePreset =
   | '5Y'
   | 'ALL';
 export type MagnetMode = 'off' | 'weak' | 'strong';
+export type HideMode = 'none' | 'drawings' | 'indicators' | 'positions' | 'all';
 
 export type RightPanelTab =
   | 'watchlist'
   | 'alerts'
   | 'data'
-  | 'hotlists'
-  | 'calendar'
-  | 'news'
   | 'objectTree'
   | null;
 
@@ -73,6 +76,9 @@ export interface ChartPaneState {
   compareSymbols: string[];
   scaleMode: ScaleMode;
   autoScale: boolean;
+  invertScale: boolean;
+  lockPriceToBarRatio: boolean;
+  priceScalePosition: PriceScalePosition;
   showVolume: boolean;
   showGrid: boolean;
   showBuySellButtons: boolean;
@@ -126,6 +132,11 @@ export interface TradingViewStateContextValue {
   setTheme: (theme: ThemeMode) => void;
   toggleTheme: () => void;
 
+  // Authentic 6-tab Supercharts settings
+  chartSettings: ChartSettings;
+  updateChartSettings: (patch: ChartSettingsPatch) => void;
+  resetChartSettings: () => void;
+
   // Routing
   route: AppRoute;
   navigate: (view: AppView, symbolId?: string) => void;
@@ -168,11 +179,16 @@ export interface TradingViewStateContextValue {
     paneIndex?: number,
   ) => void;
   removeIndicator: (indicatorId: string, paneIndex?: number) => void;
+  clearIndicators: (paneIndex?: number) => void;
+  clearAllObjects: (paneIndex?: number) => void;
   toggleIndicatorVisibility: (indicatorId: string, paneIndex?: number) => void;
   addCompareSymbol: (ticker: string, paneIndex?: number) => void;
   removeCompareSymbol: (ticker: string, paneIndex?: number) => void;
   setScaleMode: (mode: ScaleMode, paneIndex?: number) => void;
   toggleAutoScale: (paneIndex?: number) => void;
+  toggleInvertScale: (paneIndex?: number) => void;
+  toggleLockPriceToBarRatio: (paneIndex?: number) => void;
+  setPriceScalePosition: (position: PriceScalePosition, paneIndex?: number) => void;
   setRangePreset: (preset: RangePreset, paneIndex?: number) => void;
 
   // Bar Replay
@@ -185,21 +201,32 @@ export interface TradingViewStateContextValue {
   setReplayBarIndex: (barIndex: number) => void;
   exitReplay: () => void;
 
-  // Drawings
+  // Drawings & Pro Drawing Management
   drawingsBySymbol: Record<string, DrawingObject[]>;
   activeDrawings: DrawingObject[];
   activeTool: DrawingToolType;
   setActiveTool: (tool: DrawingToolType) => void;
+  favoriteTools: CanonicalDrawingToolType[];
+  toggleFavoriteTool: (tool: DrawingToolType) => void;
+  showFavoritesBar: boolean;
+  setShowFavoritesBar: (visible: boolean) => void;
+  toggleFavoritesBar: () => void;
   magnetMode: MagnetMode;
   setMagnetMode: (mode: MagnetMode) => void;
   stayInDrawingMode: boolean;
   setStayInDrawingMode: (stay: boolean) => void;
   lockDrawings: boolean;
   setLockDrawings: (locked: boolean) => void;
+  hideMode: HideMode;
+  setHideMode: (mode: HideMode) => void;
   hideDrawings: boolean;
   setHideDrawings: (hidden: boolean) => void;
   selectedDrawingId: string | null;
   setSelectedDrawingId: (id: string | null) => void;
+  selectedDrawingSettingsId: string | null;
+  selectedDrawingSettingsOpen: boolean;
+  openDrawingSettings: (id: string) => void;
+  closeDrawingSettings: () => void;
   canUndoDrawing: boolean;
   canRedoDrawing: boolean;
   addDrawing: (drawing: DrawingObject) => void;
@@ -209,6 +236,9 @@ export interface TradingViewStateContextValue {
     patch: Partial<DrawingObject>,
   ) => void;
   deleteDrawing: (symbol: string, drawingId: string) => void;
+  cloneDrawing: (id: string, symbol?: string) => DrawingObject | null;
+  bringToFront: (id: string, symbol?: string) => void;
+  sendToBack: (id: string, symbol?: string) => void;
   clearDrawings: (symbol?: string) => void;
   undoDrawing: (symbol?: string) => void;
   redoDrawing: (symbol?: string) => void;

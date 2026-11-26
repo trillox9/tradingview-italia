@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import type { AssetClass, RatingLabel, SymbolInfo } from '../../types';
 import {
-  FINANCIAL_NEWS,
   formatMarketCap,
   formatPercent,
   formatPrice,
@@ -154,7 +153,7 @@ function TechnicalSpeedometer({
 }
 
 export function WatchlistPanel() {
-  const { openModal, setBottomPanel, setRightPanel } = useTradingView();
+  const { openModal, setBottomPanel } = useTradingView();
   const { quotes } = useQuotes();
   const { activeSymbol, setSymbol, technicalSummary } = useActivePane();
   const {
@@ -282,13 +281,6 @@ export function WatchlistPanel() {
       : taTab === 'movingAverages'
         ? technicalSummary.movingAverages
         : technicalSummary.summary;
-
-  const symbolNews = useMemo(() => {
-    const matched = FINANCIAL_NEWS.filter((n) =>
-      n.relatedTickers.includes(activeSymbol.ticker),
-    );
-    return (matched.length > 0 ? matched : FINANCIAL_NEWS).slice(0, 3);
-  }, [activeSymbol.ticker]);
 
   return (
     <div className="tv-watchlist-layout">
@@ -604,24 +596,6 @@ export function WatchlistPanel() {
             neutralCount={activeGauge.neutralCount}
             buyCount={activeGauge.buyCount}
           />
-        </div>
-
-        {/* Latest 3 Symbol News */}
-        <div className="tv-sd-news">
-          <h4 className="tv-ta-title">Ultime notizie</h4>
-          {symbolNews.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="tv-sd-news-item"
-              onClick={() => setRightPanel('news')}
-            >
-              <div className="tv-sd-news-meta">
-                {item.source} • {item.publishedAgo}
-              </div>
-              <div className="tv-sd-news-title">{item.title}</div>
-            </button>
-          ))}
         </div>
       </div>
     </div>

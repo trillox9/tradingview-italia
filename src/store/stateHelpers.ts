@@ -1,11 +1,19 @@
-import type {
-  Candle,
-  DrawingObject,
-  IndicatorConfig,
-  IndicatorSeries,
-  PineExecutionResult,
-  SymbolInfo,
-  WatchlistGroup,
+import {
+  DRAWING_TOOL_REGISTRY,
+  getDefaultChartSettings,
+  mergeChartSettings,
+  normalizeDrawingTool,
+  type Candle,
+  type CanonicalDrawingToolType,
+  type ChartSettings,
+  type ChartSettingsPatch,
+  type DrawingObject,
+  type DrawingToolType,
+  type IndicatorConfig,
+  type IndicatorSeries,
+  type PineExecutionResult,
+  type SymbolInfo,
+  type WatchlistGroup,
 } from '../types';
 import {
   DEFAULT_WATCHLISTS,
@@ -30,12 +38,26 @@ import type {
 
 export const STORE_STORAGE_KEYS = {
   theme: 'tv_it_theme_v1',
+  chartSettings: 'tv_it_chart_settings_v1',
   drawings: 'tv_it_drawings_v1',
+  favoriteTools: 'tv_it_favorite_tools_v1',
+  showFavoritesBar: 'tv_it_show_favorites_bar_v1',
   watchlists: 'tv_it_watchlists_v1',
   activeWatchlist: 'tv_it_active_watchlist_v1',
   panes: 'tv_it_panes_v1',
   layoutMode: 'tv_it_layout_v1',
 } as const;
+
+export const DEFAULT_FAVORITE_TOOLS: CanonicalDrawingToolType[] = [
+  'trendline',
+  'hline',
+  'fib_retracement',
+  'channel',
+  'long_position',
+  'rectangle',
+  'text',
+  'measure',
+];
 
 export const LAYOUT_PANE_COUNTS: Record<LayoutMode, number> = {
   '1': 1,
@@ -105,6 +127,9 @@ export function createDefaultPane(
     compareSymbols: [],
     scaleMode: 'regular',
     autoScale: true,
+    invertScale: false,
+    lockPriceToBarRatio: false,
+    priceScalePosition: 'right',
     showVolume: true,
     showGrid: true,
     showBuySellButtons: true,
@@ -250,6 +275,10 @@ export interface DrawingsBundle {
   historyBySymbol: Record<string, DrawingSymbolHistory>;
 }
 
+function normalizeDrawingZIndices(list: DrawingObject[]): DrawingObject[] {
+  return list.map((d, idx) => ({ ...d, zIndex: idx + 1 }));
+}
+
 function pushDrawingSnapshot(
   bundle: DrawingsBundle,
   symbol: string,
@@ -280,8 +309,13 @@ export function addDrawingMutation(
   drawing: DrawingObject,
 ): DrawingsBundle {
   const sym = normalizeSymbolTicker(drawing.symbol);
-  const normalized: DrawingObject = { ...drawing, symbol: sym };
   const current = bundle.drawingsBySymbol[sym] ?? [];
+  const maxZ = current.reduce((acc, item, i) => Math.max(acc, item.zIndex ?? i + 1), 0);
+  const normalized: DrawingObject = {
+    ...drawing,
+    symbol: sym,
+    zIndex: drawing.zIndex ?? maxZ + 1,
+  };
   return pushDrawingSnapshot(bundle, sym, [...current, normalized]);
 }
 
@@ -313,6 +347,103 @@ export function deleteDrawingMutation(
     sym,
     current.filter((d) => d.id !== drawingId),
   );
+}
+
+let cloneSeq = 1;
+
+/**
+ * Clones a drawing with a gentle price offset so it is immediately visible
+ * next to the original, assigning a new unique ID and top z-order.
+ */
+export function cloneDrawingMutation(
+  bundle: DrawingsBundle,
+  symbol: string,
+  drawingId: string,
+  newId?: string,
+): { bundle: DrawingsBundle; cloned: DrawingObject | null } {
+  const sym = normalizeSymbolTicker(symbol);
+  const current = bundle.drawingsBySymbol[sym] ?? [];
+  const source = current.find((d) => d.id === drawingId);
+  if (!source) {
+    return { bundle, cloned: null };
+  }
+
+  const prices = source.points.map((p) => p.price);
+  const minP = prices.length > 0 ? Math.min(...prices) : 0;
+  const maxP = prices.length > 0 ? Math.max(...prices) : 0;
+  const spanP = maxP - minP;
+  const priceOffset =
+    spanP > 0 ? spanP * 0.08 : Math.max(Math.abs(minP) * 0.005, 0.01);
+
+  cloneSeq += 1;
+  const id = newId ?? `drw-clone-${Date.now()}-${cloneSeq}`;
+  const maxZ = current.reduce((acc, item, i) => Math.max(acc, item.zIndex ?? i + 1), 0);
+
+  const cloned: DrawingObject = {
+    ...source,
+    id,
+    symbol: sym,
+    locked: false,
+    visible: true,
+    createdAt: Date.now(),
+    zIndex: maxZ + 1,
+    points: source.points.map((pt) => ({
+      time: pt.time,
+      price: pt.price + priceOffset,
+    })),
+    style: { ...source.style },
+    fibLevels: source.fibLevels ? [...source.fibLevels] : undefined,
+    visibleTimeframes: source.visibleTimeframes
+      ? [...source.visibleTimeframes]
+      : undefined,
+    stopPrice:
+      source.stopPrice !== undefined
+        ? source.stopPrice + priceOffset
+        : undefined,
+    targetPrice:
+      source.targetPrice !== undefined
+        ? source.targetPrice + priceOffset
+        : undefined,
+  };
+
+  return {
+    bundle: pushDrawingSnapshot(bundle, sym, [...current, cloned]),
+    cloned,
+  };
+}
+
+/** Moves a drawing to the top of the visual render stack (highest zIndex) */
+export function bringDrawingToFrontMutation(
+  bundle: DrawingsBundle,
+  symbol: string,
+  drawingId: string,
+): DrawingsBundle {
+  const sym = normalizeSymbolTicker(symbol);
+  const current = bundle.drawingsBySymbol[sym] ?? [];
+  const idx = current.findIndex((d) => d.id === drawingId);
+  if (idx === -1) return bundle;
+  if (idx === current.length - 1 && current[idx].zIndex === current.length) {
+    return bundle;
+  }
+  const reordered = [...current.slice(0, idx), ...current.slice(idx + 1), current[idx]];
+  return pushDrawingSnapshot(bundle, sym, normalizeDrawingZIndices(reordered));
+}
+
+/** Moves a drawing to the bottom of the visual render stack (lowest zIndex) */
+export function sendDrawingToBackMutation(
+  bundle: DrawingsBundle,
+  symbol: string,
+  drawingId: string,
+): DrawingsBundle {
+  const sym = normalizeSymbolTicker(symbol);
+  const current = bundle.drawingsBySymbol[sym] ?? [];
+  const idx = current.findIndex((d) => d.id === drawingId);
+  if (idx === -1) return bundle;
+  if (idx === 0 && current[0].zIndex === 1) {
+    return bundle;
+  }
+  const reordered = [current[idx], ...current.slice(0, idx), ...current.slice(idx + 1)];
+  return pushDrawingSnapshot(bundle, sym, normalizeDrawingZIndices(reordered));
 }
 
 export function clearDrawingsMutation(
@@ -440,6 +571,40 @@ export function savePersistedTheme(theme: ThemeMode, storage?: StorageLike): boo
   }
 }
 
+export function loadPersistedChartSettings(
+  theme: ThemeMode,
+  storage?: StorageLike,
+): ChartSettings {
+  const defaults = getDefaultChartSettings(theme);
+  const store = resolveStorage(storage);
+  if (!store) return defaults;
+  try {
+    const raw = store.getItem(STORE_STORAGE_KEYS.chartSettings);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return mergeChartSettings(defaults, parsed as ChartSettingsPatch);
+    }
+    return defaults;
+  } catch {
+    return defaults;
+  }
+}
+
+export function savePersistedChartSettings(
+  settings: ChartSettings,
+  storage?: StorageLike,
+): boolean {
+  const store = resolveStorage(storage);
+  if (!store) return false;
+  try {
+    store.setItem(STORE_STORAGE_KEYS.chartSettings, JSON.stringify(settings));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function loadPersistedDrawings(
   storage?: StorageLike,
 ): Record<string, DrawingObject[]> {
@@ -466,6 +631,68 @@ export function savePersistedDrawings(
   if (!store) return false;
   try {
     store.setItem(STORE_STORAGE_KEYS.drawings, JSON.stringify(drawings));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadPersistedFavoriteTools(
+  storage?: StorageLike,
+): CanonicalDrawingToolType[] {
+  const store = resolveStorage(storage);
+  if (!store) return [...DEFAULT_FAVORITE_TOOLS];
+  try {
+    const raw = store.getItem(STORE_STORAGE_KEYS.favoriteTools);
+    if (!raw) return [...DEFAULT_FAVORITE_TOOLS];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_FAVORITE_TOOLS];
+    const out: CanonicalDrawingToolType[] = [];
+    for (const item of parsed) {
+      if (typeof item !== 'string') continue;
+      const norm = normalizeDrawingTool(item as DrawingToolType);
+      if (norm in DRAWING_TOOL_REGISTRY && !out.includes(norm)) {
+        out.push(norm);
+      }
+    }
+    return out;
+  } catch {
+    return [...DEFAULT_FAVORITE_TOOLS];
+  }
+}
+
+export function savePersistedFavoriteTools(
+  tools: readonly CanonicalDrawingToolType[],
+  storage?: StorageLike,
+): boolean {
+  const store = resolveStorage(storage);
+  if (!store) return false;
+  try {
+    store.setItem(STORE_STORAGE_KEYS.favoriteTools, JSON.stringify(tools));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadPersistedShowFavoritesBar(storage?: StorageLike): boolean {
+  const store = resolveStorage(storage);
+  if (!store) return false;
+  try {
+    return store.getItem(STORE_STORAGE_KEYS.showFavoritesBar) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function savePersistedShowFavoritesBar(
+  show: boolean,
+  storage?: StorageLike,
+): boolean {
+  const store = resolveStorage(storage);
+  if (!store) return false;
+  try {
+    store.setItem(STORE_STORAGE_KEYS.showFavoritesBar, show ? '1' : '0');
     return true;
   } catch {
     return false;

@@ -4,18 +4,37 @@ import {
   useActivePane,
   type RangePreset,
 } from '../../store';
-import { ChartCanvas } from './ChartCanvas';
+import {
+  ChartCanvas,
+  type ChartContextMenuPayload,
+  type ChartContextMenuTarget,
+  type PriceAxisPlusPayload,
+} from './ChartCanvas';
+
+export type {
+  ChartContextMenuPayload,
+  ChartContextMenuTarget,
+  PriceAxisPlusPayload,
+};
 
 export interface MultiChartGridProps {
   rangeSignal?: { preset: RangePreset; seq: number } | null;
   resetSignal?: number;
   onHoverCandle?: (candle: Candle | null, barIndex: number | null) => void;
+  onChartContextMenu?: (payload: ChartContextMenuPayload) => void;
+  onPriceAxisPlusClick?: (payload: PriceAxisPlusPayload) => void;
+  onZoomHistoryChange?: (canZoomOut: boolean, zoomOutFn: () => void) => void;
+  hideInlineDrawingBar?: boolean;
 }
 
 export function MultiChartGrid({
   rangeSignal,
   resetSignal,
   onHoverCandle,
+  onChartContextMenu,
+  onPriceAxisPlusClick,
+  onZoomHistoryChange,
+  hideInlineDrawingBar,
 }: MultiChartGridProps) {
   const {
     layoutMode,
@@ -45,6 +64,12 @@ export function MultiChartGrid({
           resetSignal={idx === activePaneIndex ? resetSignal : undefined}
           onFocusPane={setActivePaneIndex}
           onHoverCandle={idx === activePaneIndex ? onHoverCandle : undefined}
+          onChartContextMenu={onChartContextMenu}
+          onPriceAxisPlusClick={onPriceAxisPlusClick}
+          onZoomHistoryChange={
+            idx === activePaneIndex ? onZoomHistoryChange : undefined
+          }
+          hideInlineDrawingBar={hideInlineDrawingBar}
         />
       ))}
     </div>

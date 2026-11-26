@@ -1,0 +1,1032 @@
+/* ==========================================================================
+   TradingView Italia — Supercharts Pro Drawing Toolbar, Flyouts,
+   Floating Favorites Bar, Floating Drawing Toolbar & Drawing Settings Modal
+   Supports Obsidian Dark (#000 / #131313 / #222 / #303030) & Crisp Light
+   ========================================================================== */
+
+/* Shared theme-aware variables for floating overlays & modals */
+.sc-left-bar,
+.sc-dt-flyout,
+.sc-fav-bar,
+.sc-float-draw-bar,
+.sc-drw-modal-backdrop {
+  --dt-bg: #ffffff;
+  --dt-popup: #ffffff;
+  --dt-elevated: #f8f9fd;
+  --dt-hover: #f2f2f2;
+  --dt-active-bg: #e3effd;
+  --dt-active-text: #2962ff;
+  --dt-border: #dbdbdb;
+  --dt-divider: #ebebeb;
+  --dt-text: #131313;
+  --dt-text-strong: #000000;
+  --dt-text-muted: #707070;
+  --dt-brand: #2962ff;
+  --dt-brand-hover: #1e53e5;
+  --dt-danger: #f23645;
+  --dt-star: #f59e0b;
+  --dt-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme='dark'] .sc-left-bar,
+[data-theme='dark'] .sc-dt-flyout,
+[data-theme='dark'] .sc-fav-bar,
+[data-theme='dark'] .sc-float-draw-bar,
+[data-theme='dark'] .sc-drw-modal-backdrop,
+html.theme-dark:not([data-theme='light']) .sc-left-bar,
+html.theme-dark:not([data-theme='light']) .sc-dt-flyout,
+html.theme-dark:not([data-theme='light']) .sc-fav-bar,
+html.theme-dark:not([data-theme='light']) .sc-float-draw-bar,
+html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
+  --dt-bg: #000000;
+  --dt-popup: #131313;
+  --dt-elevated: #1c1c1c;
+  --dt-hover: #222222;
+  --dt-active-bg: #132042;
+  --dt-active-text: #5b9cf6;
+  --dt-border: #303030;
+  --dt-divider: #2e2e2e;
+  --dt-text: #b8b8b8;
+  --dt-text-strong: #ffffff;
+  --dt-text-muted: #8c8c8c;
+  --dt-brand: #2962ff;
+  --dt-brand-hover: #1e53e5;
+  --dt-danger: #f7525f;
+  --dt-star: #fbbf24;
+  --dt-shadow: 0 12px 34px rgba(0, 0, 0, 0.78);
+}
+
+/* ======================== 1. LEFT 52px DRAWING RAIL ======================== */
+.sc-left-bar {
+  grid-column: 1;
+  grid-row: 2;
+  width: 52px;
+  height: 100%;
+  background: var(--dt-bg);
+  border-top-right-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  z-index: 35;
+  user-select: none;
+}
+
+.sc-left-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.sc-dt-slot {
+  position: relative;
+  width: 52px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sc-dt-btn {
+  width: 38px;
+  height: 34px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dt-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  transition: background 110ms ease, color 110ms ease;
+}
+
+.sc-dt-btn:hover:not(:disabled) {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-dt-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sc-dt-btn--active {
+  background: var(--dt-active-bg);
+  color: var(--dt-active-text);
+}
+
+.sc-dt-btn--active:hover:not(:disabled) {
+  background: var(--dt-active-bg);
+  color: var(--dt-active-text);
+}
+
+.sc-dt-btn--danger:hover:not(:disabled) {
+  color: var(--dt-danger);
+  background: rgba(242, 54, 69, 0.14);
+}
+
+.sc-dt-btn--star-active {
+  color: var(--dt-star);
+}
+
+/* Right-edge flyout trigger caret (>) */
+.sc-dt-caret {
+  position: absolute;
+  right: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 11px;
+  height: 28px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dt-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 110ms ease, background 110ms ease, color 110ms ease;
+}
+
+.sc-dt-slot:hover .sc-dt-caret,
+.sc-dt-caret--open,
+.sc-dt-slot--active .sc-dt-caret {
+  opacity: 1;
+}
+
+.sc-dt-caret:hover,
+.sc-dt-caret--open {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-dt-sep {
+  width: 26px;
+  height: 1px;
+  background: var(--dt-divider);
+  margin: 4px 0;
+  flex-shrink: 0;
+}
+
+.sc-dt-spacer {
+  flex: 1 1 auto;
+  min-height: 6px;
+}
+
+.sc-dt-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--dt-brand);
+  color: #ffffff;
+  line-height: 12px;
+  pointer-events: none;
+}
+
+.sc-dt-badge--strong {
+  background: #089981;
+}
+
+/* ======================== 2. FLYOUT POPUP MENUS ======================== */
+.sc-dt-flyout {
+  position: fixed;
+  z-index: 360;
+  min-width: 248px;
+  max-width: min(310px, calc(100vw - 68px));
+  overflow-y: auto;
+  background: var(--dt-popup);
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  box-shadow: var(--dt-shadow);
+  padding: 6px;
+  color: var(--dt-text);
+  font-size: 13px;
+  user-select: none;
+}
+
+.sc-dt-flyout--compact {
+  min-width: 218px;
+}
+
+.sc-dt-flyout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 7px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--dt-divider);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dt-text-strong);
+}
+
+.sc-dt-flyout-section {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dt-text-muted);
+  padding: 7px 10px 3px;
+}
+
+.sc-dt-flyout-sep {
+  height: 1px;
+  background: var(--dt-divider);
+  margin: 5px 4px;
+}
+
+.sc-dt-flyout-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  padding: 1px 2px 1px 0;
+  transition: background 100ms ease;
+}
+
+.sc-dt-flyout-row:hover {
+  background: var(--dt-hover);
+}
+
+.sc-dt-flyout-row--active {
+  background: var(--dt-active-bg);
+}
+
+.sc-dt-flyout-row--active:hover {
+  background: var(--dt-active-bg);
+}
+
+.sc-dt-flyout-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--dt-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sc-dt-flyout-row:hover .sc-dt-flyout-main {
+  color: var(--dt-text-strong);
+}
+
+.sc-dt-flyout-row--active .sc-dt-flyout-main {
+  color: var(--dt-active-text);
+  font-weight: 600;
+}
+
+.sc-dt-flyout-main:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sc-dt-flyout-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.sc-dt-flyout-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-dt-flyout-kbd {
+  font-size: 10.5px;
+  color: var(--dt-text-muted);
+  font-family: var(--tv-font-mono, monospace);
+  flex-shrink: 0;
+}
+
+.sc-dt-star-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dt-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.25;
+  transition: opacity 110ms ease, color 110ms ease, background 110ms ease;
+}
+
+.sc-dt-flyout-row:hover .sc-dt-star-btn,
+.sc-dt-star-btn--active {
+  opacity: 1;
+}
+
+.sc-dt-star-btn:hover {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--dt-star);
+}
+
+.sc-dt-star-btn--active {
+  color: var(--dt-star);
+}
+
+/* ======================== 3. FLOATING FAVORITES BAR ======================== */
+.sc-fav-bar {
+  position: fixed;
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px 4px 4px;
+  max-width: calc(100vw - 16px);
+  background: var(--dt-popup);
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  box-shadow: var(--dt-shadow);
+  user-select: none;
+}
+
+.sc-drag-grip {
+  width: 18px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dt-text-muted);
+  cursor: grab;
+  border-radius: 4px;
+  flex-shrink: 0;
+  touch-action: none;
+}
+
+.sc-drag-grip:hover {
+  color: var(--dt-text-strong);
+  background: var(--dt-hover);
+}
+
+.sc-drag-grip:active {
+  cursor: grabbing;
+}
+
+.sc-fav-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dt-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.sc-fav-btn:hover {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-fav-btn--active {
+  background: var(--dt-active-bg);
+  color: var(--dt-active-text);
+}
+
+.sc-fav-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--dt-divider);
+  margin: 0 2px;
+}
+
+/* ======================== 4. FLOATING SELECTED DRAWING TOOLBAR ======================== */
+.sc-float-draw-bar {
+  position: fixed;
+  z-index: 48;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 4px 7px 4px 4px;
+  max-width: calc(100vw - 16px);
+  background: var(--dt-popup);
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  box-shadow: var(--dt-shadow);
+  color: var(--dt-text);
+  font-size: 12px;
+  user-select: none;
+}
+
+.sc-fdt-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sc-fdt-btn {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dt-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.sc-fdt-btn:hover {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-fdt-btn--active {
+  background: var(--dt-active-bg);
+  color: var(--dt-active-text);
+}
+
+.sc-fdt-btn--danger:hover {
+  color: var(--dt-danger);
+  background: rgba(242, 54, 69, 0.14);
+}
+
+.sc-fdt-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--dt-divider);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.sc-fdt-color-pill {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.sc-fdt-color-bar {
+  width: 15px;
+  height: 3.5px;
+  border-radius: 2px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+}
+
+.sc-fdt-fill-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid var(--dt-border);
+}
+
+.sc-fdt-popover {
+  position: fixed;
+  z-index: 380;
+  background: var(--dt-popup);
+  border: 1px solid var(--dt-border);
+  border-radius: 8px;
+  box-shadow: var(--dt-shadow);
+  padding: 8px;
+  color: var(--dt-text);
+  min-width: 180px;
+}
+
+.sc-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.sc-swatch-cell {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1.5px solid rgba(128, 128, 128, 0.3);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 90ms ease, border-color 90ms ease;
+}
+
+.sc-swatch-cell:hover {
+  transform: scale(1.1);
+}
+
+.sc-swatch-cell--active {
+  border-color: var(--dt-brand);
+  box-shadow: 0 0 0 2px rgba(41, 98, 255, 0.38);
+}
+
+.sc-fdt-custom-color {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dt-divider);
+  font-size: 11.5px;
+}
+
+.sc-fdt-custom-color input[type='color'] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--dt-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.sc-fdt-opacity-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--dt-divider);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+}
+
+.sc-fdt-opacity-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--dt-text-muted);
+}
+
+.sc-fdt-range {
+  width: 100%;
+  accent-color: var(--dt-brand);
+  cursor: pointer;
+}
+
+.sc-fdt-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 152px;
+}
+
+.sc-fdt-dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dt-text);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sc-fdt-dropdown-item:hover {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-fdt-dropdown-item--active {
+  background: var(--dt-active-bg);
+  color: var(--dt-active-text);
+  font-weight: 600;
+}
+
+/* ======================== 5. DRAWING SETTINGS MODAL ======================== */
+.sc-drw-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 420;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(3px);
+}
+
+.sc-drw-modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 36px);
+  display: flex;
+  flex-direction: column;
+  background: var(--dt-popup);
+  color: var(--dt-text);
+  border: 1px solid var(--dt-border);
+  border-radius: 12px;
+  box-shadow: var(--dt-shadow);
+  overflow: hidden;
+}
+
+.sc-drw-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--dt-divider);
+}
+
+.sc-drw-modal-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.sc-drw-modal-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--dt-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-drw-modal-sub {
+  font-size: 11.5px;
+  color: var(--dt-text-muted);
+}
+
+.sc-drw-modal-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dt-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sc-drw-modal-close:hover {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--dt-divider);
+  background: var(--dt-bg);
+}
+
+.sc-drw-tab {
+  position: relative;
+  height: 40px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--dt-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sc-drw-tab:hover {
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-tab--active {
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-tab--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: var(--dt-brand);
+  border-radius: 2px 2px 0 0;
+}
+
+.sc-drw-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sc-drw-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sc-drw-row-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dt-text);
+}
+
+.sc-drw-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dt-text-muted);
+  padding-top: 6px;
+  border-top: 1px solid var(--dt-divider);
+}
+
+.sc-drw-section-title:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.sc-drw-inline-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sc-drw-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--dt-elevated);
+  border: 1px solid var(--dt-border);
+}
+
+.sc-drw-pill {
+  height: 26px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dt-text);
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.sc-drw-pill:hover {
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-pill--active {
+  background: var(--dt-brand);
+  color: #ffffff;
+}
+
+.sc-drw-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--dt-text);
+  cursor: pointer;
+}
+
+.sc-drw-check input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--dt-brand);
+  cursor: pointer;
+}
+
+.sc-drw-input,
+.sc-drw-textarea,
+.sc-drw-select {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dt-border);
+  background: var(--dt-bg);
+  color: var(--dt-text-strong);
+  font-size: 13px;
+  outline: none;
+}
+
+.sc-drw-input:focus,
+.sc-drw-textarea:focus,
+.sc-drw-select:focus {
+  border-color: var(--dt-brand);
+}
+
+.sc-drw-textarea {
+  min-height: 76px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.sc-drw-fib-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sc-drw-fib-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--dt-divider);
+  background: var(--dt-elevated);
+}
+
+.sc-drw-fib-input {
+  width: 72px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--dt-border);
+  background: var(--dt-bg);
+  color: var(--dt-text-strong);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-drw-coord-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dt-divider);
+  background: var(--dt-elevated);
+}
+
+.sc-drw-coord-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-coord-time {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dt-text-muted);
+}
+
+.sc-drw-coord-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sc-drw-coord-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sc-drw-coord-field label {
+  font-size: 11px;
+  color: var(--dt-text-muted);
+}
+
+.sc-drw-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--dt-divider);
+  background: var(--dt-bg);
+}
+
+.sc-drw-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sc-drw-btn {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sc-drw-btn--ghost {
+  background: transparent;
+  color: var(--dt-text);
+  border-color: var(--dt-border);
+}
+
+.sc-drw-btn--ghost:hover {
+  background: var(--dt-hover);
+  color: var(--dt-text-strong);
+}
+
+.sc-drw-btn--danger {
+  background: rgba(242, 54, 69, 0.14);
+  color: var(--dt-danger);
+}
+
+.sc-drw-btn--danger:hover {
+  background: #f23645;
+  color: #ffffff;
+}
+
+.sc-drw-btn--primary {
+  background: var(--dt-brand);
+  color: #ffffff;
+}
+
+.sc-drw-btn--primary:hover {
+  background: var(--dt-brand-hover);
+}
+
+/* ======================== 6. RESPONSIVE MOBILE / TABLET ======================== */
+@media (max-width: 900px) {
+  .sc-left-bar {
+    position: fixed;
+    top: 44px;
+    left: 6px;
+    bottom: 84px;
+    width: 50px;
+    height: auto;
+    border-radius: 10px;
+    border: 1px solid var(--dt-border);
+    box-shadow: var(--dt-shadow);
+    z-index: 55;
+  }
+
+  .sc-left-bar--mobile-hidden {
+    display: none;
+  }
+
+  .sc-dt-slot {
+    width: 48px;
+  }
+
+  /* Make caret comfortably visible on touch devices */
+  .sc-dt-caret {
+    opacity: 0.72;
+  }
+
+  .sc-dt-star-btn {
+    opacity: 0.7;
+  }
+}
+
+@media (max-width: 640px) {
+  .sc-drw-fib-grid,
+  .sc-drw-coord-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .sc-drw-modal {
+    max-height: calc(100vh - 20px);
+  }
+}
