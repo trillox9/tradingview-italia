@@ -82,6 +82,10 @@ const GROUP_FLYOUT_SECTIONS: Record<
       title: 'Canali',
       tools: ['channel', 'flat_channel', 'disjoint_channel', 'regression_trend'],
     },
+    {
+      title: 'Pitchfork',
+      tools: ['pitchfork', 'schiff_pitchfork'],
+    },
   ],
   gann_fib: [
     {
@@ -96,8 +100,8 @@ const GROUP_FLYOUT_SECTIONS: Record<
       ],
     },
     {
-      title: 'Gann e Forconi',
-      tools: ['gann_box', 'gann_fan', 'pitchfork', 'schiff_pitchfork'],
+      title: 'Gann',
+      tools: ['gann_box', 'gann_fan'],
     },
   ],
   patterns: [
@@ -876,15 +880,27 @@ const HIDE_MODE_OPTIONS: ReadonlyArray<{ mode: HideMode; label: string }> = [
   { mode: 'none', label: 'Mostra tutto' },
   { mode: 'drawings', label: 'Nascondi disegni' },
   { mode: 'indicators', label: 'Nascondi indicatori' },
-  { mode: 'positions', label: 'Nascondi posizioni e ordini' },
   { mode: 'all', label: 'Nascondi tutto' },
 ];
 
 const MAGNET_OPTIONS: ReadonlyArray<{ mode: MagnetMode; label: string; hint?: string }> = [
   { mode: 'off', label: 'Disattiva' },
-  { mode: 'weak', label: 'Calamita debole', hint: 'OHLC vicino' },
-  { mode: 'strong', label: 'Calamita forte', hint: 'OHLC forzato' },
+  { mode: 'weak', label: 'Magnete debole', hint: 'OHLC vicino' },
+  { mode: 'strong', label: 'Magnete forte', hint: 'OHLC forzato' },
 ];
+
+export const LONG_PRESS_VALUES_STORAGE_KEY = 'tv_it_long_press_values_v1';
+
+export function readLongPressValuesEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(LONG_PRESS_VALUES_STORAGE_KEY);
+    if (raw === '0' || raw === 'false') return false;
+  } catch {
+    // ignore storage errors
+  }
+  return true;
+}
 
 export function DrawingToolbar({
   canZoomOut = false,
@@ -916,6 +932,9 @@ export function DrawingToolbar({
   } = useDrawings();
 
   const [groupToolMap, setGroupToolMap] = useState(getInitialGroupToolMap);
+  const [longPressValuesEnabled, setLongPressValuesEnabled] = useState<boolean>(
+    readLongPressValuesEnabled,
+  );
   const [flyout, setFlyout] = useState<FlyoutKind | null>(null);
   const [flyoutCoords, setFlyoutCoords] = useState<{ top: number; left: number; maxHeight: number }>({
     top: 48,
@@ -1496,6 +1515,43 @@ export function DrawingToolbar({
                   })}
                 </div>
               ))}
+              {flyout.group === 'cursors' && (
+                <>
+                  <div className="sc-dt-flyout-sep" />
+                  <label
+                    className="sc-dt-flyout-row"
+                    style={{
+                      padding: '6px 8px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      gap: '8px',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={longPressValuesEnabled}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setLongPressValuesEnabled(next);
+                        try {
+                          window.localStorage.setItem(
+                            LONG_PRESS_VALUES_STORAGE_KEY,
+                            next ? '1' : '0',
+                          );
+                        } catch {
+                          // ignore
+                        }
+                        window.dispatchEvent(
+                          new CustomEvent('tv-long-press-values-change', {
+                            detail: { enabled: next },
+                          }),
+                        );
+                      }}
+                    />
+                    <span>Valori visualizzati al tocco prolungato</span>
+                  </label>
+                </>
+              )}
             </>
           )}
 

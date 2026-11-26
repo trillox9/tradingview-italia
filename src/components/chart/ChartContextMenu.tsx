@@ -8,17 +8,22 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  CHART_DATE_FORMAT_OPTIONS,
+  CHART_TIMEZONE_OPTIONS,
   DRAWING_TOOL_REGISTRY,
-  type ChartDateFormat,
-  type ChartTimezoneSetting,
+  normalizeDrawingTool,
 } from '../../types';
 import { formatPrice } from '../../data';
+import {
+  createPastedDrawing,
+  getCopiedDrawing,
+  setCopiedDrawing,
+} from '../../engine';
 import {
   resolveSymbolInfo,
   useActivePane,
   useAlerts,
   useDrawings,
-  usePaperTrading,
   useQuotes,
   useTradingView,
 } from '../../store';
@@ -40,6 +45,7 @@ export interface ChartContextMenuState {
   timestamp?: number;
   drawingId?: string;
   paneIndex?: number;
+  priceToBarRatio?: number;
 }
 
 export interface ChartContextMenuProps {
@@ -59,17 +65,20 @@ type SubmenuId =
   | 'dateFormat'
   | 'order';
 
-function CheckGlyph({ checked, radio }: { checked: boolean; radio?: boolean }) {
+function CheckGlyph({ checked }: { checked: boolean; radio?: boolean }) {
   if (!checked) return null;
-  if (radio) {
-    return (
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <polyline points="2.5,7.3 5.5,10.2 11.5,3.8" />
-      </svg>
-    );
-  }
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <polyline points="2.5,7.3 5.5,10.2 11.5,3.8" />
     </svg>
   );
@@ -77,7 +86,17 @@ function CheckGlyph({ checked, radio }: { checked: boolean; radio?: boolean }) {
 
 function SubChevron() {
   return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <polyline points="3.5,2 6.5,5 3.5,8" />
     </svg>
   );
@@ -85,11 +104,28 @@ function SubChevron() {
 
 function GearGlyph() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="8" cy="8" r="2.2" />
       <path d="M8 2v1.4M8 12.6V14M2 8h1.4M12.6 8H14M3.8 3.8l1 1M11.2 11.2l1 1M12.2 3.8l-1 1M4.8 11.2l-1 1" />
     </svg>
   );
+}
+
+function formatRatioItalian(ratio: number): string {
+  if (!Number.isFinite(ratio) || ratio <= 0) return '1,0000';
+  if (ratio >= 100) return ratio.toFixed(2).replace('.', ',');
+  if (ratio >= 1) return ratio.toFixed(3).replace('.', ',');
+  return ratio.toFixed(4).replace('.', ',');
 }
 
 function MenuItem({
@@ -123,7 +159,13 @@ function MenuItem({
     <button
       type="button"
       title={title}
-      role={checked !== undefined ? (radio ? 'menuitemradio' : 'menuitemcheckbox') : 'menuitem'}
+      role={
+        checked !== undefined
+          ? radio
+            ? 'menuitemradio'
+            : 'menuitemcheckbox'
+          : 'menuitem'
+      }
       aria-checked={checked}
       aria-haspopup={hasSubmenu ? 'menu' : undefined}
       aria-expanded={hasSubmenu ? submenuOpen : undefined}
@@ -175,25 +217,6 @@ function MenuItem({
   );
 }
 
-const TIMEZONE_OPTIONS: ReadonlyArray<{
-  value: ChartTimezoneSetting;
-  label: string;
-}> = [
-  { value: 'Europe/Rome', label: 'Europe/Rome (UTC+1)' },
-  { value: 'UTC', label: 'UTC' },
-  { value: 'America/New_York', label: 'America/New_York (EST)' },
-  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (JST)' },
-];
-
-const DATE_FORMAT_OPTIONS: ReadonlyArray<{
-  value: ChartDateFormat;
-  label: string;
-}> = [
-  { value: 'DD MMM', label: 'GG MMM' },
-  { value: 'YYYY-MM-DD', label: 'AAAA-MM-GG' },
-  { value: 'DD/MM/YYYY', label: 'GG/MM/AAAA' },
-];
-
 export function ChartContextMenu({
   menu,
   onClose,
@@ -208,7 +231,6 @@ export function ChartContextMenu({
     chartSettings,
     updateChartSettings,
     openModal,
-    setRightPanel,
     appendLog,
   } = useTradingView();
 
@@ -237,11 +259,11 @@ export function ChartContextMenu({
     sendToBack,
     clearDrawings,
     openDrawingSettings,
+    setSelectedDrawingId,
   } = useDrawings();
 
   const { quotes } = useQuotes();
   const { createAlert } = useAlerts();
-  const { placeOrder } = usePaperTrading();
 
   const menuRef = useRef<HTMLDivElement | null>(null);
   const subMenuRef = useRef<HTMLDivElement | null>(null);
@@ -275,6 +297,9 @@ export function ChartContextMenu({
         : null,
     [menu?.drawingId, targetDrawings],
   );
+  const targetDrawingMeta = targetDrawing
+    ? DRAWING_TOOL_REGISTRY[normalizeDrawingTool(targetDrawing.type)]
+    : null;
 
   const resolvedPrecision = useMemo(() => {
     const p = chartSettings.symbol.precision;
@@ -291,6 +316,21 @@ export function ChartContextMenu({
       ? menu.price
       : livePrice;
   const formattedPrice = formatPrice(cursorPrice, resolvedPrecision);
+
+  const ratioValue =
+    menu?.priceToBarRatio && Number.isFinite(menu.priceToBarRatio)
+      ? menu.priceToBarRatio
+      : chartSettings.scales.priceToBarRatio;
+  const formattedRatio = formatRatioItalian(ratioValue);
+
+  const effectiveInvert =
+    targetPane.invertScale ?? chartSettings.scales.invertScale;
+  const effectiveLockRatio =
+    targetPane.lockPriceToBarRatio ?? chartSettings.scales.lockPriceToBarRatio;
+  const effectivePriceScalePos =
+    targetPane.priceScalePosition ?? chartSettings.scales.position;
+
+  const copiedDrawing = getCopiedDrawing();
 
   const cancelSubClose = useCallback(() => {
     if (closeSubTimerRef.current !== null) {
@@ -343,7 +383,7 @@ export function ChartContextMenu({
     return () => window.removeEventListener('resize', clampMain);
   }, [menu]);
 
-  // Clamp nested submenu cleanly inside viewport (flips left when near right edge!)
+  // Clamp nested submenu cleanly inside viewport (flips left when near right edge or mobile!)
   useLayoutEffect(() => {
     if (!openSubmenu || !subMenuRef.current || !subAnchorRef.current) return;
     const clampSub = () => {
@@ -357,7 +397,9 @@ export function ChartContextMenu({
       if (left + subRect.width > vw - 8) {
         left = anchor.left - subRect.width + 2;
       }
-      left = Math.max(8, Math.min(vw - subRect.width - 8, left));
+      if (left < 8) {
+        left = Math.max(8, vw - subRect.width - 8);
+      }
 
       let top = anchor.top - 4;
       if (top + subRect.height > vh - 8) {
@@ -376,7 +418,7 @@ export function ChartContextMenu({
     return () => window.removeEventListener('resize', clampSub);
   }, [openSubmenu]);
 
-  // Close on outside click, Escape, or scroll outside menu
+  // Close on outside click or Escape
   useEffect(() => {
     if (!menu) return;
     const onPointerDown = (e: PointerEvent) => {
@@ -418,6 +460,16 @@ export function ChartContextMenu({
     onNotify?.(msg);
   };
 
+  const openSettingsAtTab = (
+    tab: 'symbol' | 'statusLine' | 'scales' | 'canvas' | 'alerts',
+  ) => {
+    window.dispatchEvent(
+      new CustomEvent('tv-open-settings-tab', { detail: { tab } }),
+    );
+    openModal('settings');
+    onClose();
+  };
+
   const handleCopyPrice = () => {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -436,14 +488,14 @@ export function ChartContextMenu({
     onClose();
   };
 
-  const handleCreateAlertAtPrice = () => {
+  const handleCreateAlertAtPrice = (customName?: string) => {
     const condition = cursorPrice >= livePrice ? 'crosses_above' : 'crosses_below';
     createAlert({
       symbol: targetSymbol.ticker,
       target: 'price',
       condition,
       value: cursorPrice,
-      name: `${targetSymbol.ticker} @ ${formattedPrice}`,
+      name: customName ?? `${targetSymbol.ticker} @ ${formattedPrice}`,
       message: `Alert ${targetSymbol.ticker} raggiunto livello ${formattedPrice}`,
     });
     notify(`Alert creato su ${targetSymbol.ticker} a ${formattedPrice}`);
@@ -473,17 +525,24 @@ export function ChartContextMenu({
     onClose();
   };
 
-  const handlePlaceLimitOrder = (side: 'buy' | 'sell') => {
-    placeOrder({
-      symbol: targetSymbol.ticker,
-      side,
-      type: 'limit',
-      quantity: 1,
-      limitPrice: cursorPrice,
-    });
-    notify(
-      `Ordine ${side === 'buy' ? 'Compra' : 'Vendi'} Limite 1 ${targetSymbol.ticker} @ ${formattedPrice}`,
+  const handlePasteDrawing = () => {
+    const src = getCopiedDrawing();
+    if (!src) return;
+    const anchor = src.points[0];
+    const priceOffset =
+      anchor && Number.isFinite(cursorPrice) ? cursorPrice - anchor.price : 0;
+    const timeOffset =
+      anchor && menu.timestamp !== undefined ? menu.timestamp - anchor.time : 0;
+    const pasted = createPastedDrawing(
+      src,
+      targetSymbol.ticker,
+      targetPane.timeframe,
+      priceOffset,
+      timeOffset,
     );
+    addDrawing(pasted);
+    setSelectedDrawingId(pasted.id);
+    notify('Disegno incollato');
     onClose();
   };
 
@@ -505,12 +564,16 @@ export function ChartContextMenu({
     onClose();
   };
 
+  const drawingsCount = targetDrawings.length;
+  const indicatorsCount = targetPane.indicators.length;
+
   return (
     <>
       <div
         ref={menuRef}
         className="sc-ctx-menu"
         role="menu"
+        data-testid={`ctx-menu-${menu.target}`}
         aria-label={`Menu contestuale ${menu.target}`}
         style={{
           left: coords.left,
@@ -519,7 +582,7 @@ export function ChartContextMenu({
         }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {/* ======================== 1. PRICE AXIS MENU ======================== */}
+        {/* ======================== 1. PRICE AXIS MENU (1:1 TradingView Italia) ======================== */}
         {menu.target === 'price_axis' && (
           <>
             <div
@@ -528,15 +591,13 @@ export function ChartContextMenu({
             >
               <MenuItem
                 label="Ripristina scala prezzi"
-                shortcut="Alt+R"
+                shortcut="Alt + R"
                 onClick={() => {
                   onResetPriceScale?.();
                   if (!onResetPriceScale) {
                     if (!targetPane.autoScale) toggleAutoScale(targetPaneIdx);
-                    if (chartSettings.scales.invertScale) {
-                      toggleInvertScale(targetPaneIdx);
-                    }
-                    if (chartSettings.scales.lockPriceToBarRatio) {
+                    if (effectiveInvert) toggleInvertScale(targetPaneIdx);
+                    if (effectiveLockRatio) {
                       toggleLockPriceToBarRatio(targetPaneIdx);
                     }
                   }
@@ -544,7 +605,7 @@ export function ChartContextMenu({
                 }}
               />
               <MenuItem
-                label="Auto (adatta i dati allo schermo)"
+                label="Auto (adatta dati a schermo)"
                 checked={targetPane.autoScale}
                 onClick={() => {
                   toggleAutoScale(targetPaneIdx);
@@ -553,14 +614,20 @@ export function ChartContextMenu({
               />
               <MenuItem
                 label="Blocca rapporto prezzo/barra"
-                checked={chartSettings.scales.lockPriceToBarRatio}
+                shortcut={formattedRatio}
+                checked={effectiveLockRatio}
                 onClick={() => {
+                  if (!effectiveLockRatio && ratioValue > 0) {
+                    updateChartSettings({
+                      scales: { priceToBarRatio: Number(ratioValue.toFixed(6)) },
+                    });
+                  }
                   toggleLockPriceToBarRatio(targetPaneIdx);
                   onClose();
                 }}
               />
               <MenuItem
-                label="Scala solo sul grafico prezzi"
+                label="Utilizza solo scala del prezzo"
                 checked={chartSettings.scales.scalePriceChartOnly}
                 onClick={() => {
                   updateChartSettings({
@@ -573,9 +640,9 @@ export function ChartContextMenu({
                 }}
               />
               <MenuItem
-                label="Inverti scala"
-                shortcut="Alt+I"
-                checked={chartSettings.scales.invertScale}
+                label="Inverti asse"
+                shortcut="Alt + I"
+                checked={effectiveInvert}
                 onClick={() => {
                   toggleInvertScale(targetPaneIdx);
                   onClose();
@@ -595,7 +662,7 @@ export function ChartContextMenu({
               />
               <MenuItem
                 label="Percentuale"
-                shortcut="Alt+P"
+                shortcut="Alt + P"
                 radio
                 checked={targetPane.scaleMode === 'percent'}
                 onClick={() => {
@@ -604,7 +671,7 @@ export function ChartContextMenu({
                 }}
               />
               <MenuItem
-                label="Indicizzato a 100"
+                label="Indicizzata a base 100"
                 radio
                 checked={targetPane.scaleMode === 'indexed100'}
                 onClick={() => {
@@ -614,11 +681,28 @@ export function ChartContextMenu({
               />
               <MenuItem
                 label="Logaritmica"
-                shortcut="Alt+L"
+                shortcut="Alt + L"
                 radio
                 checked={targetPane.scaleMode === 'log'}
                 onClick={() => {
                   setScaleMode('log', targetPaneIdx);
+                  onClose();
+                }}
+              />
+
+              <div className="sc-ctx-sep" />
+
+              <MenuItem
+                label={
+                  effectivePriceScalePos === 'right'
+                    ? 'Sposta asse a sinistra'
+                    : 'Sposta asse a destra'
+                }
+                onClick={() => {
+                  setPriceScalePosition(
+                    effectivePriceScalePos === 'right' ? 'left' : 'right',
+                    targetPaneIdx,
+                  );
                   onClose();
                 }}
               />
@@ -641,7 +725,7 @@ export function ChartContextMenu({
 
             <div onMouseEnter={clearNonSubHover}>
               <MenuItem
-                label="Pulsante più (+)"
+                label='Pulsante "+"'
                 checked={chartSettings.scales.showPlusButton}
                 onClick={() => {
                   updateChartSettings({
@@ -650,42 +734,25 @@ export function ChartContextMenu({
                   onClose();
                 }}
               />
-              <MenuItem
-                label={
-                  chartSettings.scales.position === 'right'
-                    ? 'Sposta scala a sinistra'
-                    : 'Sposta scala a destra'
-                }
-                onClick={() => {
-                  setPriceScalePosition(
-                    chartSettings.scales.position === 'right' ? 'left' : 'right',
-                    targetPaneIdx,
-                  );
-                  onClose();
-                }}
-              />
 
               <div className="sc-ctx-sep" />
 
               <MenuItem
-                label="Impostazioni..."
+                label="Altre impostazioni…"
                 icon={<GearGlyph />}
-                onClick={() => {
-                  openModal('settings');
-                  onClose();
-                }}
+                onClick={() => openSettingsAtTab('scales')}
               />
             </div>
           </>
         )}
 
-        {/* ======================== 2. MAIN CANVAS MENU ======================== */}
+        {/* ======================== 2. MAIN CANVAS MENU (1:1 TradingView Italia) ======================== */}
         {menu.target === 'canvas' && (
           <>
             <div onMouseEnter={clearNonSubHover}>
               <MenuItem
-                label="Ripristina vista grafico"
-                shortcut="Alt+R"
+                label="Reimposta la visualizzazione del grafico"
+                shortcut="Alt + R"
                 onClick={() => {
                   onResetChartView?.();
                   onResetPriceScale?.();
@@ -700,43 +767,26 @@ export function ChartContextMenu({
                 onClick={handleCopyPrice}
               />
               <MenuItem
+                label="Incolla"
+                shortcut="Ctrl + V"
+                disabled={!copiedDrawing}
+                onClick={handlePasteDrawing}
+              />
+              <MenuItem
                 label={`Aggiungi alert su ${targetSymbol.ticker} a ${formattedPrice}`}
-                shortcut="Alt+A"
-                onClick={handleCreateAlertAtPrice}
+                shortcut="Alt + A"
+                onClick={() => handleCreateAlertAtPrice()}
               />
               <MenuItem
                 label={`Disegna linea orizzontale a ${formattedPrice}`}
                 onClick={handlePlaceHorizontalLine}
               />
-              <MenuItem
-                label={`Vendi limite a ${formattedPrice}`}
-                shortcut="Alt+Shift+S"
-                onClick={() => handlePlaceLimitOrder('sell')}
-              />
-              <MenuItem
-                label={`Compra limite a ${formattedPrice}`}
-                onClick={() => handlePlaceLimitOrder('buy')}
-              />
 
               <div className="sc-ctx-sep" />
 
               <MenuItem
-                label="Albero oggetti..."
-                onClick={() => {
-                  setRightPanel('objectTree');
-                  onClose();
-                }}
-              />
-              <MenuItem
-                label="Finestra dati"
-                onClick={() => {
-                  setRightPanel('data');
-                  onClose();
-                }}
-              />
-              <MenuItem
                 label="Nascondi disegni"
-                shortcut="Ctrl+Alt+H"
+                shortcut="Ctrl + Alt + H"
                 checked={hideDrawings}
                 onClick={() => {
                   setHideDrawings(!hideDrawings);
@@ -744,16 +794,24 @@ export function ChartContextMenu({
                 }}
               />
               <MenuItem
-                label={`Rimuovi disegni (${targetDrawings.length})`}
-                disabled={targetDrawings.length === 0}
+                label={
+                  drawingsCount === 1
+                    ? 'Rimuovi 1 disegno'
+                    : `Rimuovi ${drawingsCount} disegni`
+                }
+                disabled={drawingsCount === 0}
                 onClick={() => {
                   clearDrawings(targetSymbol.ticker);
                   onClose();
                 }}
               />
               <MenuItem
-                label={`Rimuovi indicatori (${targetPane.indicators.length})`}
-                disabled={targetPane.indicators.length === 0}
+                label={
+                  indicatorsCount === 1
+                    ? 'Rimuovi 1 indicatore'
+                    : `Rimuovi ${indicatorsCount} indicatori`
+                }
+                disabled={indicatorsCount === 0}
                 onClick={() => {
                   clearIndicators(targetPaneIdx);
                   onClose();
@@ -771,12 +829,9 @@ export function ChartContextMenu({
             <div onMouseEnter={clearNonSubHover}>
               <div className="sc-ctx-sep" />
               <MenuItem
-                label="Impostazioni..."
+                label="Impostazioni…"
                 icon={<GearGlyph />}
-                onClick={() => {
-                  openModal('settings');
-                  onClose();
-                }}
+                onClick={() => openSettingsAtTab('canvas')}
               />
             </div>
           </>
@@ -811,34 +866,34 @@ export function ChartContextMenu({
 
             <div onMouseEnter={clearNonSubHover}>
               <MenuItem
-                label="Linee griglia verticali"
+                label="Linee della griglia verticali"
                 checked={hasVerticalGrid}
                 onClick={toggleVerticalGrid}
               />
               <div className="sc-ctx-sep" />
               <MenuItem
-                label="Impostazioni..."
+                label="Altre impostazioni…"
                 icon={<GearGlyph />}
-                onClick={() => {
-                  openModal('settings');
-                  onClose();
-                }}
+                onClick={() => openSettingsAtTab('scales')}
               />
             </div>
           </>
         )}
 
-        {/* ======================== 4. DRAWING OBJECT MENU ======================== */}
+        {/* ======================== 4. DRAWING OBJECT MENU (1:1 TradingView Authenticated) ======================== */}
         {menu.target === 'drawing' && (
           <>
             <div onMouseEnter={clearNonSubHover}>
               <MenuItem
-                label="Impostazioni..."
-                icon={<GearGlyph />}
+                label={`Aggiungi alert su ${targetDrawingMeta?.labelIt ?? 'disegno'}…`}
+                shortcut="Alt + A"
                 disabled={!targetDrawing}
                 onClick={() => {
-                  if (targetDrawing) openDrawingSettings(targetDrawing.id);
-                  onClose();
+                  if (targetDrawing) {
+                    handleCreateAlertAtPrice(
+                      `${targetSymbol.ticker} · ${targetDrawingMeta?.labelIt ?? 'Disegno'} @ ${formattedPrice}`,
+                    );
+                  }
                 }}
               />
             </div>
@@ -853,11 +908,24 @@ export function ChartContextMenu({
 
             <div onMouseEnter={clearNonSubHover}>
               <MenuItem
-                label="Clona"
+                label="Duplica"
+                shortcut="Ctrl + Drag"
                 disabled={!targetDrawing}
                 onClick={() => {
                   if (targetDrawing) {
                     cloneDrawing(targetDrawing.id, targetSymbol.ticker);
+                  }
+                  onClose();
+                }}
+              />
+              <MenuItem
+                label="Copia"
+                shortcut="Ctrl + C"
+                disabled={!targetDrawing}
+                onClick={() => {
+                  if (targetDrawing) {
+                    setCopiedDrawing(targetDrawing);
+                    notify('Disegno copiato');
                   }
                   onClose();
                 }}
@@ -886,9 +954,11 @@ export function ChartContextMenu({
                   onClose();
                 }}
               />
+
               <div className="sc-ctx-sep" />
+
               <MenuItem
-                label="Rimuovi"
+                label="Elimina"
                 shortcut="Canc"
                 danger
                 disabled={!targetDrawing || Boolean(targetDrawing.locked || lockDrawings)}
@@ -900,6 +970,18 @@ export function ChartContextMenu({
                 onClick={() => {
                   if (!targetDrawing || targetDrawing.locked || lockDrawings) return;
                   deleteDrawing(targetSymbol.ticker, targetDrawing.id);
+                  onClose();
+                }}
+              />
+
+              <div className="sc-ctx-sep" />
+
+              <MenuItem
+                label="Impostazioni…"
+                icon={<GearGlyph />}
+                disabled={!targetDrawing}
+                onClick={() => {
+                  if (targetDrawing) openDrawingSettings(targetDrawing.id);
                   onClose();
                 }}
               />
@@ -916,8 +998,8 @@ export function ChartContextMenu({
             </div>
             <MenuItem
               label={`Aggiungi alert su ${targetSymbol.ticker} a ${formattedPrice}`}
-              shortcut="Alt+A"
-              onClick={handleCreateAlertAtPrice}
+              shortcut="Alt + A"
+              onClick={() => handleCreateAlertAtPrice()}
             />
             <MenuItem
               label={`Disegna linea orizzontale a ${formattedPrice}`}
@@ -925,12 +1007,8 @@ export function ChartContextMenu({
             />
             <div className="sc-ctx-sep" />
             <MenuItem
-              label={`Compra Limite @ ${formattedPrice}`}
-              onClick={() => handlePlaceLimitOrder('buy')}
-            />
-            <MenuItem
-              label={`Vendi Limite @ ${formattedPrice}`}
-              onClick={() => handlePlaceLimitOrder('sell')}
+              label={`Copia prezzo ${formattedPrice}`}
+              onClick={handleCopyPrice}
             />
           </>
         )}
@@ -942,6 +1020,7 @@ export function ChartContextMenu({
           ref={subMenuRef}
           className="sc-ctx-submenu"
           role="menu"
+          data-testid={`ctx-submenu-${openSubmenu}`}
           style={{
             left: subCoords.left,
             top: subCoords.top,
@@ -978,7 +1057,7 @@ export function ChartContextMenu({
                 }
               />
               <MenuItem
-                label="Valore massimo e minimo"
+                label="Valori prezzo max e min"
                 checked={chartSettings.scales.showHighLowLabels}
                 onClick={() =>
                   updateChartSettings({
@@ -1062,12 +1141,23 @@ export function ChartContextMenu({
           {openSubmenu === 'lines' && (
             <>
               <MenuItem
-                label="Linea dell'ultimo prezzo"
+                label="Linea quotazioni"
                 checked={chartSettings.symbol.showLastPriceLine}
                 onClick={() =>
                   updateChartSettings({
                     symbol: {
                       showLastPriceLine: !chartSettings.symbol.showLastPriceLine,
+                    },
+                  })
+                }
+              />
+              <MenuItem
+                label="Linee prezzo max e min"
+                checked={Boolean(chartSettings.scales.showHighLowLines)}
+                onClick={() =>
+                  updateChartSettings({
+                    scales: {
+                      showHighLowLines: !chartSettings.scales.showHighLowLines,
                     },
                   })
                 }
@@ -1084,33 +1174,13 @@ export function ChartContextMenu({
                 }
               />
               <MenuItem
-                label="Linee avvisi sul grafico"
+                label="Linee alert"
                 checked={chartSettings.alerts.showAlertLines}
                 onClick={() =>
                   updateChartSettings({
                     alerts: {
                       showAlertLines: !chartSettings.alerts.showAlertLines,
                     },
-                  })
-                }
-              />
-              <MenuItem
-                label="Posizioni sul grafico"
-                checked={chartSettings.trading.showPositions}
-                onClick={() =>
-                  updateChartSettings({
-                    trading: {
-                      showPositions: !chartSettings.trading.showPositions,
-                    },
-                  })
-                }
-              />
-              <MenuItem
-                label="Ordini sul grafico"
-                checked={chartSettings.trading.showOrders}
-                onClick={() =>
-                  updateChartSettings({
-                    trading: { showOrders: !chartSettings.trading.showOrders },
                   })
                 }
               />
@@ -1141,7 +1211,7 @@ export function ChartContextMenu({
           )}
 
           {openSubmenu === 'timezone' &&
-            TIMEZONE_OPTIONS.map((tz) => (
+            CHART_TIMEZONE_OPTIONS.map((tz) => (
               <MenuItem
                 key={tz.value}
                 label={tz.label}
@@ -1155,7 +1225,7 @@ export function ChartContextMenu({
             ))}
 
           {openSubmenu === 'dateFormat' &&
-            DATE_FORMAT_OPTIONS.map((df) => (
+            CHART_DATE_FORMAT_OPTIONS.map((df) => (
               <MenuItem
                 key={df.value}
                 label={df.label}

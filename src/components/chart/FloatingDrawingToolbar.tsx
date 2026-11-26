@@ -14,7 +14,9 @@ import {
   type DrawingToolType,
   type LineStyle,
 } from '../../types';
-import { useActivePane, useDrawings } from '../../store';
+import { formatPrice } from '../../data';
+import { setCopiedDrawing } from '../../engine';
+import { useActivePane, useAlerts, useDrawings } from '../../store';
 import {
   clampFloatingBarPosition,
   useFloatingBarClearance,
@@ -51,7 +53,7 @@ const LINE_STYLES: ReadonlyArray<{ value: LineStyle; label: string }> = [
   { value: 'dotted', label: 'Punteggiata' },
 ];
 
-type PopoverKey = 'stroke' | 'fill' | 'width' | 'style' | 'order';
+type PopoverKey = 'stroke' | 'fill' | 'width' | 'style' | 'more';
 
 const FILLABLE_TOOLS = new Set<CanonicalDrawingToolType>([
   'channel',
@@ -202,6 +204,7 @@ function LinePreview({
 
 export function FloatingDrawingToolbar() {
   const { activeSymbol } = useActivePane();
+  const { createAlert } = useAlerts();
   const {
     drawings,
     selectedDrawingId,
@@ -442,6 +445,7 @@ export function FloatingDrawingToolbar() {
         ref={barRef}
         className="sc-float-draw-bar"
         role="toolbar"
+        data-testid="floating-drawing-toolbar"
         aria-label={`Barra strumenti ${toolMeta?.labelIt ?? 'disegno'}`}
         style={{ left: displayPos.x, top: displayPos.y }}
       >
@@ -533,7 +537,7 @@ export function FloatingDrawingToolbar() {
         <button
           type="button"
           className="sc-fdt-btn"
-          title="Impostazioni disegno"
+          title="Impostazioni"
           aria-label="Impostazioni"
           onClick={() => {
             setOpenPopover(null);
@@ -546,35 +550,29 @@ export function FloatingDrawingToolbar() {
           </svg>
         </button>
 
-        {/* Ordine visualizzazione */}
-        <button
-          type="button"
-          className={`sc-fdt-btn ${openPopover === 'order' ? 'sc-fdt-btn--active' : ''}`}
-          title="Ordine visualizzazione"
-          aria-label="Ordine visualizzazione"
-          aria-expanded={openPopover === 'order'}
-          onClick={(e) => togglePop('order', e.currentTarget)}
-        >
-          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="8" height="8" rx="1.2" />
-            <path d="M7 13h7a1 1 0 0 0 1-1V7" />
-          </svg>
-        </button>
-
-        {/* Clona */}
+        {/* Aggiungi alert (1:1 TradingView Authenticated Toolbar) */}
         <button
           type="button"
           className="sc-fdt-btn"
-          title="Clona disegno"
-          aria-label="Clona"
+          title="Aggiungi alert"
+          aria-label="Aggiungi alert"
           onClick={() => {
             setOpenPopover(null);
-            cloneDrawing(drawing.id, activeSymbol.ticker);
+            const anchorPrice = drawing.points[0]?.price ?? activeSymbol.basePrice;
+            const formatted = formatPrice(anchorPrice, activeSymbol.precision);
+            createAlert({
+              symbol: activeSymbol.ticker,
+              target: 'price',
+              condition: 'crosses_above',
+              value: anchorPrice,
+              name: `${activeSymbol.ticker} · ${toolMeta?.labelIt ?? 'Disegno'} @ ${formatted}`,
+              message: `Alert su ${toolMeta?.labelIt ?? 'disegno'} (${activeSymbol.ticker}) a ${formatted}`,
+            });
           }}
         >
           <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="6" y="6" width="9" height="9" rx="1.4" />
-            <path d="M12 6V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h2" />
+            <path d="M9 3.2a4.2 4.2 0 0 1 4.2 4.2v2.4l1.2 1.8H3.6l1.2-1.8V7.4A4.2 4.2 0 0 1 9 3.2z" />
+            <path d="M7.5 13.8a1.6 1.6 0 0 0 3 0" />
           </svg>
         </button>
 
@@ -601,26 +599,6 @@ export function FloatingDrawingToolbar() {
           </svg>
         </button>
 
-        {/* Nascondi / Mostra */}
-        <button
-          type="button"
-          className={`sc-fdt-btn ${!drawing.visible ? 'sc-fdt-btn--active' : ''}`}
-          title={drawing.visible ? 'Nascondi' : 'Mostra'}
-          aria-label={drawing.visible ? 'Nascondi disegno' : 'Mostra disegno'}
-          aria-pressed={!drawing.visible}
-          onClick={() =>
-            updateDrawing(activeSymbol.ticker, drawing.id, {
-              visible: !drawing.visible,
-            })
-          }
-        >
-          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M2 9s2.7-4.5 7-4.5S16 9 16 9s-2.7 4.5-7 4.5S2 9 2 9z" />
-            <circle cx="9" cy="9" r="2" />
-            {!drawing.visible && <line x1="3" y1="15" x2="15" y2="3" />}
-          </svg>
-        </button>
-
         {/* Elimina */}
         <button
           type="button"
@@ -637,6 +615,22 @@ export function FloatingDrawingToolbar() {
           <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M3.5 5h11M6.5 5V3.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1V5" />
             <path d="M5 5l.8 9.5a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9L13 5" />
+          </svg>
+        </button>
+
+        {/* Altro (•••) — Ordine visualizzazione, Duplica, Copia, Nascondi */}
+        <button
+          type="button"
+          className={`sc-fdt-btn ${openPopover === 'more' ? 'sc-fdt-btn--active' : ''}`}
+          title="Altro"
+          aria-label="Altro"
+          aria-expanded={openPopover === 'more'}
+          onClick={(e) => togglePop('more', e.currentTarget)}
+        >
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="currentColor" aria-hidden="true">
+            <circle cx="4" cy="9" r="1.4" />
+            <circle cx="9" cy="9" r="1.4" />
+            <circle cx="14" cy="9" r="1.4" />
           </svg>
         </button>
       </div>
@@ -792,7 +786,7 @@ export function FloatingDrawingToolbar() {
             </div>
           )}
 
-          {openPopover === 'order' && (
+          {openPopover === 'more' && (
             <div className="sc-fdt-dropdown-list">
               <button
                 type="button"
@@ -802,7 +796,7 @@ export function FloatingDrawingToolbar() {
                   setOpenPopover(null);
                 }}
               >
-                <span>Porta avanti</span>
+                <span>Porta in primo piano</span>
               </button>
               <button
                 type="button"
@@ -812,7 +806,42 @@ export function FloatingDrawingToolbar() {
                   setOpenPopover(null);
                 }}
               >
-                <span>Porta indietro</span>
+                <span>Sposta in secondo piano</span>
+              </button>
+              <div className="sc-dt-flyout-sep" />
+              <button
+                type="button"
+                className="sc-fdt-dropdown-item"
+                onClick={() => {
+                  cloneDrawing(drawing.id, activeSymbol.ticker);
+                  setOpenPopover(null);
+                }}
+              >
+                <span>Duplica</span>
+                <span className="sc-dt-flyout-kbd">Ctrl+Drag</span>
+              </button>
+              <button
+                type="button"
+                className="sc-fdt-dropdown-item"
+                onClick={() => {
+                  setCopiedDrawing(drawing);
+                  setOpenPopover(null);
+                }}
+              >
+                <span>Copia</span>
+                <span className="sc-dt-flyout-kbd">Ctrl+C</span>
+              </button>
+              <button
+                type="button"
+                className="sc-fdt-dropdown-item"
+                onClick={() => {
+                  updateDrawing(activeSymbol.ticker, drawing.id, {
+                    visible: !drawing.visible,
+                  });
+                  setOpenPopover(null);
+                }}
+              >
+                <span>{drawing.visible ? 'Nascondi' : 'Mostra'}</span>
               </button>
             </div>
           )}

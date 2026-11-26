@@ -251,6 +251,7 @@ function renderSingleDrawing(
   d: DrawingObject,
   isSelected: boolean,
   isEraserHovered: boolean,
+  isDraft = false,
 ) {
   const { ctx } = rc;
   const pts = d.points.map(rc.toScreen);
@@ -2073,16 +2074,26 @@ function renderSingleDrawing(
     }
   }
 
-  // Control anchor handles when selected (or hovered in eraser mode)
-  if (isSelected || isEraserHovered) {
+  // Control anchor handles when selected, hovered in eraser mode, OR actively being placed (Click 1 / Tap 1!)
+  if (isSelected || isEraserHovered || isDraft) {
     ctx.setLineDash([]);
     const handleColor = isEraserHovered ? '#F23645' : '#2962FF';
+    const drawnCoords: ScreenPoint[] = [];
     for (const pt of pts) {
+      // Avoid double-drawing identical overlapping anchor on Click 1 before mouse moves
+      if (
+        drawnCoords.some(
+          (prev) => Math.hypot(prev.x - pt.x, prev.y - pt.y) < 1.5,
+        )
+      ) {
+        continue;
+      }
+      drawnCoords.push(pt);
       ctx.fillStyle = '#ffffff';
       ctx.strokeStyle = handleColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 4.5, 0, Math.PI * 2);
+      ctx.arc(pt.x, pt.y, 4.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -2109,7 +2120,9 @@ export function renderAllDrawings(
 
   for (const d of list) {
     if (!d.visible || d.points.length === 0) continue;
+    const isDraft = Boolean(draftDrawing && d.id === draftDrawing.id);
     if (
+      !isDraft &&
       timeframe &&
       d.visibleTimeframes &&
       d.visibleTimeframes.length > 0 &&
@@ -2119,6 +2132,6 @@ export function renderAllDrawings(
     }
     const isSelected = d.id === selectedDrawingId;
     const isEraserHovered = d.id === eraserHoveredId;
-    renderSingleDrawing(rc, d, isSelected, isEraserHovered);
+    renderSingleDrawing(rc, d, isSelected, isEraserHovered, isDraft);
   }
 }

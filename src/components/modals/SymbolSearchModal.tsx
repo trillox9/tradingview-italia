@@ -7,27 +7,19 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import {
-  Check,
-  Code2,
   GitCompareArrows,
-  Lightbulb,
-  Plus,
   Search,
-  TrendingDown,
-  TrendingUp,
   X,
 } from 'lucide-react';
 import type { AssetClass, DataSourceKind, SymbolInfo } from '../../types';
 import {
-  MARKET_IDEAS,
   SYMBOLS,
   formatPercent,
   formatPrice,
 } from '../../data';
-import { PINE_TEMPLATES } from '../../engine';
-import { useActivePane, useQuotes, useTradingView, useWatchlists } from '../../store';
+import { useActivePane, useQuotes, useTradingView } from '../../store';
 
-export type SymbolSearchMode = 'chart' | 'watchlist' | 'compare';
+export type SymbolSearchMode = 'chart' | 'compare';
 
 export interface SymbolSearchModalProps {
   isOpen?: boolean;
@@ -36,7 +28,6 @@ export interface SymbolSearchModalProps {
   onSelectSymbol?: (symbol: SymbolInfo) => void;
 }
 
-type SearchTopTab = 'symbols' | 'ideas' | 'scripts';
 type SearchCategoryId =
   | 'all'
   | 'crypto'
@@ -142,14 +133,9 @@ export function SymbolSearchModal({
     modals,
     closeModal,
     openSymbolInChart,
-    navigate,
-    applyPineToChart,
-    setBottomPanel,
   } = useTradingView();
   const { quotes } = useQuotes();
   const { activePane, addCompareSymbol, setScaleMode } = useActivePane();
-  const { activeWatchlist, addSymbolToWatchlist, removeSymbolFromWatchlist } =
-    useWatchlists();
 
   const visible = isOpen ?? modals.symbolSearch;
   const handleClose = useCallback(() => {
@@ -158,7 +144,6 @@ export function SymbolSearchModal({
   }, [closeModal, onClose]);
 
   const [query, setQuery] = useState('');
-  const [topTab, setTopTab] = useState<SearchTopTab>('symbols');
   const [category, setCategory] = useState<SearchCategoryId>('all');
   const [activeMode, setActiveMode] = useState<SymbolSearchMode>(
     initialMode ?? 'chart',
@@ -269,34 +254,7 @@ export function SymbolSearchModal({
     return filteredSymbols.slice(0, INITIAL_RENDER_LIMIT);
   }, [filteredSymbols, showAllSymbols]);
 
-  const filteredIdeas = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return MARKET_IDEAS;
-    return MARKET_IDEAS.filter(
-      (idea) =>
-        idea.title.toLowerCase().includes(q) ||
-        idea.symbol.toLowerCase().includes(q) ||
-        idea.author.toLowerCase().includes(q) ||
-        idea.tags.some((t) => t.toLowerCase().includes(q)),
-    );
-  }, [query]);
-
-  const filteredScripts = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return PINE_TEMPLATES;
-    return PINE_TEMPLATES.filter(
-      (tpl) =>
-        tpl.name.toLowerCase().includes(q) ||
-        tpl.description.toLowerCase().includes(q),
-    );
-  }, [query]);
-
-  const activeListLength =
-    topTab === 'symbols'
-      ? displayedSymbols.length
-      : topTab === 'ideas'
-        ? filteredIdeas.length
-        : filteredScripts.length;
+  const activeListLength = displayedSymbols.length;
 
   useEffect(() => {
     setSelectedIndex((prev) =>
@@ -322,11 +280,6 @@ export function SymbolSearchModal({
       }
 
       const modeToUse = overrideMode ?? activeMode;
-      if (modeToUse === 'watchlist') {
-        addSymbolToWatchlist(sym.ticker);
-        handleClose();
-        return;
-      }
       if (modeToUse === 'compare') {
         addCompareSymbol(sym.ticker);
         setScaleMode('percent');
@@ -339,7 +292,6 @@ export function SymbolSearchModal({
     [
       activeMode,
       addCompareSymbol,
-      addSymbolToWatchlist,
       handleClose,
       onSelectSymbol,
       openSymbolInChart,
@@ -371,30 +323,13 @@ export function SymbolSearchModal({
     }
     if (e.key === 'Enter' && activeListLength > 0) {
       e.preventDefault();
-      if (topTab === 'symbols') {
-        const sym = displayedSymbols[selectedIndex];
-        if (sym) handleSymbolAction(sym);
-      } else if (topTab === 'ideas') {
-        const idea = filteredIdeas[selectedIndex];
-        if (idea) {
-          openSymbolInChart(idea.symbol);
-          handleClose();
-        }
-      } else {
-        const script = filteredScripts[selectedIndex];
-        if (script) {
-          applyPineToChart(script.code);
-          navigate('chart', activePane.symbolId);
-          setBottomPanel('pine');
-          handleClose();
-        }
-      }
+      const sym = displayedSymbols[selectedIndex];
+      if (sym) handleSymbolAction(sym);
     }
   };
 
   if (!visible) return null;
 
-  const watchlistSet = new Set(activeWatchlist?.symbols ?? []);
   const compareSet = new Set(activePane.compareSymbols);
 
   return (
@@ -458,42 +393,14 @@ export function SymbolSearchModal({
               <button
                 type="button"
                 role="tab"
-                aria-selected={topTab === 'symbols'}
-                className={`tvm-underline-tab ${topTab === 'symbols' ? 'is-active' : ''}`}
-                onClick={() => {
-                  setTopTab('symbols');
-                  setSelectedIndex(0);
-                }}
+                aria-selected={true}
+                className="tvm-underline-tab is-active"
               >
                 Simboli ({categoryCounts.all})
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={topTab === 'ideas'}
-                className={`tvm-underline-tab ${topTab === 'ideas' ? 'is-active' : ''}`}
-                onClick={() => {
-                  setTopTab('ideas');
-                  setSelectedIndex(0);
-                }}
-              >
-                Idee
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={topTab === 'scripts'}
-                className={`tvm-underline-tab ${topTab === 'scripts' ? 'is-active' : ''}`}
-                onClick={() => {
-                  setTopTab('scripts');
-                  setSelectedIndex(0);
-                }}
-              >
-                Script
-              </button>
             </div>
 
-            {topTab === 'symbols' && !onSelectSymbol && (
+            {!onSelectSymbol && (
               <div className="tvm-search-mode-bar" aria-label="Azione al clic">
                 <button
                   type="button"
@@ -501,13 +408,6 @@ export function SymbolSearchModal({
                   onClick={() => setActiveMode('chart')}
                 >
                   Grafico
-                </button>
-                <button
-                  type="button"
-                  className={`tvm-search-mode-btn ${activeMode === 'watchlist' ? 'is-active' : ''}`}
-                  onClick={() => setActiveMode('watchlist')}
-                >
-                  + Watchlist
                 </button>
                 <button
                   type="button"
@@ -520,36 +420,32 @@ export function SymbolSearchModal({
             )}
           </div>
 
-          {topTab === 'symbols' && (
-            <div
-              className="tvm-pill-strip tv-no-scrollbar"
-              role="tablist"
-              aria-label="Categorie strumenti"
-            >
-              {CATEGORY_PILLS.map((pill) => (
-                <button
-                  key={pill.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={category === pill.id}
-                  className={`tvm-filter-pill ${category === pill.id ? 'is-active' : ''}`}
-                  onClick={() => {
-                    setCategory(pill.id);
-                    setSelectedIndex(0);
-                    setShowAllSymbols(false);
-                  }}
-                >
-                  <span>{pill.label}</span>
-                  <span className="tvm-pill-count">{categoryCounts[pill.id]}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <div
+            className="tvm-pill-strip tv-no-scrollbar"
+            role="tablist"
+            aria-label="Categorie strumenti"
+          >
+            {CATEGORY_PILLS.map((pill) => (
+              <button
+                key={pill.id}
+                type="button"
+                role="tab"
+                aria-selected={category === pill.id}
+                className={`tvm-filter-pill ${category === pill.id ? 'is-active' : ''}`}
+                onClick={() => {
+                  setCategory(pill.id);
+                  setSelectedIndex(0);
+                  setShowAllSymbols(false);
+                }}
+              >
+                <span>{pill.label}</span>
+                <span className="tvm-pill-count">{categoryCounts[pill.id]}</span>
+              </button>
+            ))}
+          </div>
 
           <div className="tvm-search-results" ref={listRef}>
-            {topTab === 'symbols' && (
-              <>
-                {displayedSymbols.length === 0 ? (
+            {displayedSymbols.length === 0 ? (
                   <div className="tvp-empty-state">
                     <Search size={28} />
                     <div>Nessun simbolo trovato per &ldquo;{query}&rdquo;</div>
@@ -564,7 +460,6 @@ export function SymbolSearchModal({
                         ((sym.basePrice - sym.prevClose) / sym.prevClose) * 100;
                       const isUp = deltaPct > 0.0001;
                       const isDown = deltaPct < -0.0001;
-                      const inWatchlist = watchlistSet.has(sym.ticker);
                       const inCompare = compareSet.has(sym.ticker);
                       const flag = COUNTRY_FLAGS[sym.country] ?? '🌐';
 
@@ -631,24 +526,6 @@ export function SymbolSearchModal({
                             >
                               <button
                                 type="button"
-                                className={`tvm-icon-action ${inWatchlist ? 'is-active' : ''}`}
-                                title={
-                                  inWatchlist
-                                    ? 'Rimuovi dalla watchlist attiva'
-                                    : 'Aggiungi alla watchlist attiva'
-                                }
-                                onClick={() => {
-                                  if (inWatchlist) {
-                                    removeSymbolFromWatchlist(sym.ticker);
-                                  } else {
-                                    addSymbolToWatchlist(sym.ticker);
-                                  }
-                                }}
-                              >
-                                {inWatchlist ? <Check size={15} /> : <Plus size={15} />}
-                              </button>
-                              <button
-                                type="button"
                                 className={`tvm-icon-action ${inCompare ? 'is-active' : ''}`}
                                 title="Confronta sul grafico attivo"
                                 onClick={() => {
@@ -677,118 +554,6 @@ export function SymbolSearchModal({
                     )}
                   </>
                 )}
-              </>
-            )}
-
-            {topTab === 'ideas' && (
-              <>
-                {filteredIdeas.length === 0 ? (
-                  <div className="tvp-empty-state">
-                    <Lightbulb size={28} />
-                    <div>Nessuna idea trovata per &ldquo;{query}&rdquo;</div>
-                  </div>
-                ) : (
-                  filteredIdeas.map((idea, idx) => (
-                    <div
-                      key={idea.id}
-                      data-result-index={idx}
-                      className={`tvm-symbol-row ${idx === selectedIndex ? 'is-selected' : ''}`}
-                      onMouseEnter={() => setSelectedIndex(idx)}
-                      onClick={() => {
-                        openSymbolInChart(idea.symbol);
-                        handleClose();
-                      }}
-                    >
-                      <div className="tvm-symbol-left">
-                        <span
-                          className="tvm-avatar"
-                          style={{ backgroundColor: idea.authorAvatarColor }}
-                        >
-                          {idea.direction === 'LONG' ? (
-                            <TrendingUp size={15} />
-                          ) : idea.direction === 'SHORT' ? (
-                            <TrendingDown size={15} />
-                          ) : (
-                            <Lightbulb size={15} />
-                          )}
-                        </span>
-                        <div className="tvm-symbol-meta">
-                          <div className="tvm-symbol-ticker-line">
-                            <span
-                              className="tvm-symbol-ticker"
-                              style={{ fontSize: '0.86rem' }}
-                            >
-                              {idea.title}
-                            </span>
-                          </div>
-                          <div className="tvm-symbol-desc-line">
-                            <span className="tvm-asset-tag">{idea.symbol}</span>
-                            <span className="tvm-symbol-name">
-                              di {idea.author} · {idea.publishedAgo}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <span className="tvm-exchange-pill">{idea.timeframe}</span>
-                    </div>
-                  ))
-                )}
-              </>
-            )}
-
-            {topTab === 'scripts' && (
-              <>
-                {filteredScripts.length === 0 ? (
-                  <div className="tvp-empty-state">
-                    <Code2 size={28} />
-                    <div>Nessuno script trovato per &ldquo;{query}&rdquo;</div>
-                  </div>
-                ) : (
-                  filteredScripts.map((tpl, idx) => (
-                    <div
-                      key={tpl.id}
-                      data-result-index={idx}
-                      className={`tvm-symbol-row ${idx === selectedIndex ? 'is-selected' : ''}`}
-                      onMouseEnter={() => setSelectedIndex(idx)}
-                      onClick={() => {
-                        applyPineToChart(tpl.code);
-                        navigate('chart', activePane.symbolId);
-                        setBottomPanel('pine');
-                        handleClose();
-                      }}
-                    >
-                      <div className="tvm-symbol-left">
-                        <span
-                          className="tvm-avatar"
-                          style={{
-                            backgroundColor: tpl.isStrategy ? '#2962FF' : '#089981',
-                          }}
-                        >
-                          <Code2 size={15} />
-                        </span>
-                        <div className="tvm-symbol-meta">
-                          <div className="tvm-symbol-ticker-line">
-                            <span
-                              className="tvm-symbol-ticker"
-                              style={{ fontSize: '0.88rem' }}
-                            >
-                              {tpl.name}
-                            </span>
-                            <span className="tvm-asset-tag">
-                              {tpl.isStrategy ? 'STRATEGIA' : 'INDICATORE'}
-                            </span>
-                          </div>
-                          <div className="tvm-symbol-desc-line">
-                            <span className="tvm-symbol-name">{tpl.description}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <span className="tvm-exchange-pill">Pine v5</span>
-                    </div>
-                  ))
-                )}
-              </>
-            )}
           </div>
 
           <div className="tvm-search-footer">
@@ -799,22 +564,14 @@ export function SymbolSearchModal({
               </span>
               <span className="tvm-kbd-hint">
                 <kbd className="tvm-kbd">↵</kbd>{' '}
-                {activeMode === 'watchlist'
-                  ? 'Aggiungi a Watchlist'
-                  : activeMode === 'compare'
-                    ? 'Confronta'
-                    : 'Apri su Supercharts'}
+                {activeMode === 'compare' ? 'Confronta' : 'Apri su Supercharts'}
               </span>
               <span className="tvm-kbd-hint">
                 <kbd className="tvm-kbd">Esc</kbd> Chiudi
               </span>
             </div>
             <span>
-              {topTab === 'symbols'
-                ? `${displayedSymbols.length} di ${filteredSymbols.length} strumenti`
-                : topTab === 'ideas'
-                  ? `${filteredIdeas.length} idee`
-                  : `${filteredScripts.length} script Pine`}
+              {displayedSymbols.length} di {filteredSymbols.length} strumenti
             </span>
           </div>
         </div>

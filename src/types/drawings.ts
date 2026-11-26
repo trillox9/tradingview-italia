@@ -26,7 +26,9 @@ export type TrendLineToolType =
   | 'channel'
   | 'flat_channel'
   | 'disjoint_channel'
-  | 'regression_trend';
+  | 'regression_trend'
+  | 'pitchfork'
+  | 'schiff_pitchfork';
 
 export type GannFibToolType =
   | 'fib_retracement'
@@ -36,9 +38,7 @@ export type GannFibToolType =
   | 'fib_speed_fan'
   | 'fib_circles'
   | 'gann_box'
-  | 'gann_fan'
-  | 'pitchfork'
-  | 'schiff_pitchfork';
+  | 'gann_fan';
 
 export type PatternToolType =
   | 'xabcd_pattern'
@@ -174,7 +174,7 @@ export const DRAWING_TOOL_REGISTRY: Record<
   crosshair: {
     id: 'crosshair',
     group: 'cursors',
-    labelIt: 'Mirino',
+    labelIt: 'Croce',
     shortcut: 'Esc',
     pointCount: 1,
     defaultColor: '#8C8C8C',
@@ -202,18 +202,18 @@ export const DRAWING_TOOL_REGISTRY: Record<
   eraser: {
     id: 'eraser',
     group: 'cursors',
-    labelIt: 'Gomma',
+    labelIt: 'Cancellino',
     pointCount: 1,
     defaultColor: '#F23645',
     defaultLineWidth: 1,
     defaultLineStyle: 'solid',
   },
 
-  // ---- Group 2: Strumenti linea di tendenza (13) ----
+  // ---- Group 2: Strumenti analisi trend (15) ----
   trendline: {
     id: 'trendline',
     group: 'trend_lines',
-    labelIt: 'Linea di tendenza',
+    labelIt: 'Trendline',
     shortcut: 'Alt+T',
     pointCount: 2,
     defaultColor: '#2962FF',
@@ -223,7 +223,7 @@ export const DRAWING_TOOL_REGISTRY: Record<
   ray: {
     id: 'ray',
     group: 'trend_lines',
-    labelIt: 'Semiretta',
+    labelIt: 'Raggio',
     pointCount: 2,
     defaultColor: '#2962FF',
     defaultLineWidth: 2,
@@ -232,7 +232,7 @@ export const DRAWING_TOOL_REGISTRY: Record<
   info_line: {
     id: 'info_line',
     group: 'trend_lines',
-    labelIt: 'Linea informativa',
+    labelIt: 'Infolinea',
     pointCount: 2,
     defaultColor: '#2962FF',
     defaultLineWidth: 2,
@@ -269,7 +269,7 @@ export const DRAWING_TOOL_REGISTRY: Record<
   hray: {
     id: 'hray',
     group: 'trend_lines',
-    labelIt: 'Semiretta orizzontale',
+    labelIt: 'Raggio orizzontale',
     shortcut: 'Alt+J',
     pointCount: 1,
     defaultColor: '#2962FF',
@@ -289,7 +289,7 @@ export const DRAWING_TOOL_REGISTRY: Record<
   cross_line: {
     id: 'cross_line',
     group: 'trend_lines',
-    labelIt: 'Linea a croce',
+    labelIt: 'Linea trasversale',
     shortcut: 'Alt+C',
     pointCount: 1,
     defaultColor: '#2962FF',
@@ -337,11 +337,11 @@ export const DRAWING_TOOL_REGISTRY: Record<
     defaultLineStyle: 'solid',
   },
 
-  // ---- Group 3: Strumenti di Gann e Fibonacci (10) ----
+  // ---- Group 3: Strumenti di Gann e Fibonacci (8) ----
   fib_retracement: {
     id: 'fib_retracement',
     group: 'gann_fib',
-    labelIt: 'Ritracciamento di Fibonacci',
+    labelIt: 'Ritracciamento Fib',
     shortcut: 'Alt+F',
     pointCount: 2,
     defaultColor: '#787B86',
@@ -418,8 +418,8 @@ export const DRAWING_TOOL_REGISTRY: Record<
   },
   pitchfork: {
     id: 'pitchfork',
-    group: 'gann_fib',
-    labelIt: 'Forcone',
+    group: 'trend_lines',
+    labelIt: 'Pitchfork',
     pointCount: 3,
     defaultColor: '#2962FF',
     defaultFillColor: 'rgba(41, 98, 255, 0.10)',
@@ -428,8 +428,8 @@ export const DRAWING_TOOL_REGISTRY: Record<
   },
   schiff_pitchfork: {
     id: 'schiff_pitchfork',
-    group: 'gann_fib',
-    labelIt: 'Forcone di Schiff',
+    group: 'trend_lines',
+    labelIt: 'Pitchfork di Schiff',
     pointCount: 3,
     defaultColor: '#7E57C2',
     defaultFillColor: 'rgba(126, 87, 194, 0.10)',
@@ -510,8 +510,8 @@ export const DRAWING_TOOL_REGISTRY: Record<
   long_position: {
     id: 'long_position',
     group: 'projection',
-    labelIt: 'Posizione Long',
-    pointCount: 2,
+    labelIt: 'Posizione long',
+    pointCount: 1,
     defaultColor: '#089981',
     defaultFillColor: 'rgba(8, 153, 129, 0.22)',
     defaultLineWidth: 1.5,
@@ -520,8 +520,8 @@ export const DRAWING_TOOL_REGISTRY: Record<
   short_position: {
     id: 'short_position',
     group: 'projection',
-    labelIt: 'Posizione Short',
-    pointCount: 2,
+    labelIt: 'Posizione short',
+    pointCount: 1,
     defaultColor: '#F23645',
     defaultFillColor: 'rgba(242, 54, 69, 0.22)',
     defaultLineWidth: 1.5,
@@ -823,7 +823,7 @@ export const DRAWING_TOOL_GROUPS: readonly DrawingToolGroupDef[] = [
   },
   {
     id: 'trend_lines',
-    labelIt: 'Strumenti linea di tendenza',
+    labelIt: 'Strumenti analisi trend',
     tools: [
       'trendline',
       'ray',
@@ -838,6 +838,8 @@ export const DRAWING_TOOL_GROUPS: readonly DrawingToolGroupDef[] = [
       'flat_channel',
       'disjoint_channel',
       'regression_trend',
+      'pitchfork',
+      'schiff_pitchfork',
     ],
   },
   {
@@ -852,8 +854,6 @@ export const DRAWING_TOOL_GROUPS: readonly DrawingToolGroupDef[] = [
       'fib_circles',
       'gann_box',
       'gann_fan',
-      'pitchfork',
-      'schiff_pitchfork',
     ],
   },
   {

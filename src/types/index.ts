@@ -3,4 +3,3 @@ export * from './indicators';
 export * from './drawings';
 export * from './chartSettings';
 export * from './trading';
-export * from './editorial';

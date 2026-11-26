@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WATCHLISTS,
-  ECONOMIC_CALENDAR,
-  FINANCIAL_NEWS,
-  HEATMAP_SECTORS,
-  MARKET_IDEAS,
   MarketFeed,
   SYMBOLS,
-  buildHeatmapSectors,
   clearCandleCache,
   formatMarketCap,
   formatPercent,
@@ -214,38 +209,3 @@ describe('MarketFeed Live Simulator (marketFeed.ts)', () => {
   });
 });
 
-describe('Italian Editorial Datasets (editorialData.ts)', () => {
-  it('provides rich Italian ideas, financial news, economic calendar, and sector heatmaps', () => {
-    expect(MARKET_IDEAS.length).toBeGreaterThanOrEqual(10);
-    expect(FINANCIAL_NEWS.length).toBeGreaterThanOrEqual(12);
-    expect(ECONOMIC_CALENDAR.length).toBeGreaterThanOrEqual(15);
-
-    for (const idea of MARKET_IDEAS) {
-      expect(getSymbolByTicker(idea.symbol)).toBeDefined();
-      expect(['LONG', 'SHORT', 'NEUTRALE']).toContain(idea.direction);
-      expect(idea.summary.length).toBeGreaterThan(20);
-    }
-
-    const sectorNames = HEATMAP_SECTORS.map((s) => s.name);
-    expect(sectorNames).toEqual([
-      'Tecnologia',
-      'Finanza',
-      'Energia',
-      'Automotive',
-      'Lusso',
-      'Sanità',
-    ]);
-    for (const sector of HEATMAP_SECTORS) {
-      expect(sector.stocks.length).toBeGreaterThan(0);
-      expect(sector.totalMarketCap).toBeGreaterThan(0);
-    }
-
-    // Live quote overlay on heatmap
-    const feed = new MarketFeed({ enableLiveCrypto: false });
-    feed.ingestExternalTrade('RACE', 460.0, 100, Date.now(), 'simulated');
-    const liveSectors = buildHeatmapSectors(feed.getAllQuotes());
-    const lusso = liveSectors.find((s) => s.name === 'Lusso')!;
-    const raceTile = lusso.stocks.find((s) => s.ticker === 'RACE')!;
-    expect(raceTile.price).toBe(460.0);
-  });
-});

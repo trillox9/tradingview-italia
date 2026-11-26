@@ -10,10 +10,18 @@ export type ChartPrecisionSetting =
   | '8';
 
 export type ChartTimezoneSetting =
-  | 'Europe/Rome'
   | 'UTC'
+  | 'Europe/Rome'
+  | 'Europe/Berlin'
+  | 'Europe/London'
   | 'America/New_York'
-  | 'Asia/Tokyo';
+  | 'America/Chicago'
+  | 'America/Los_Angeles'
+  | 'Asia/Dubai'
+  | 'Asia/Hong_Kong'
+  | 'Asia/Singapore'
+  | 'Asia/Tokyo'
+  | 'Australia/Sydney';
 
 export type StatusLineTitleMode =
   | 'ticker'
@@ -24,9 +32,43 @@ export type PriceScalePosition = 'right' | 'left';
 
 export type ChartScaleMode = 'regular' | 'log' | 'percent' | 'indexed100';
 
-export type ChartDateFormat = 'DD MMM' | 'YYYY-MM-DD' | 'DD/MM/YYYY';
+export type ChartDateFormat =
+  | 'DD MMM'
+  | 'YYYY-MM-DD'
+  | 'DD/MM/YYYY'
+  | 'MM/DD/YYYY';
+
+export const CHART_TIMEZONE_OPTIONS: ReadonlyArray<{
+  value: ChartTimezoneSetting;
+  label: string;
+  shortTag: string;
+}> = [
+  { value: 'UTC', label: '(UTC) Tempo Universale', shortTag: 'UTC' },
+  { value: 'Europe/Rome', label: '(UTC+1) Roma', shortTag: 'UTC+1' },
+  { value: 'Europe/Berlin', label: '(UTC+1) Berlino', shortTag: 'UTC+1' },
+  { value: 'Europe/London', label: '(UTC) Londra', shortTag: 'UTC' },
+  { value: 'America/New_York', label: '(UTC-5) New York', shortTag: 'UTC-5' },
+  { value: 'America/Chicago', label: '(UTC-6) Chicago', shortTag: 'UTC-6' },
+  { value: 'America/Los_Angeles', label: '(UTC-8) Los Angeles', shortTag: 'UTC-8' },
+  { value: 'Asia/Dubai', label: '(UTC+4) Dubai', shortTag: 'UTC+4' },
+  { value: 'Asia/Hong_Kong', label: '(UTC+8) Hong Kong', shortTag: 'UTC+8' },
+  { value: 'Asia/Singapore', label: '(UTC+8) Singapore', shortTag: 'UTC+8' },
+  { value: 'Asia/Tokyo', label: '(UTC+9) Tokyo', shortTag: 'UTC+9' },
+  { value: 'Australia/Sydney', label: '(UTC+11) Sydney', shortTag: 'UTC+11' },
+];
+
+export const CHART_DATE_FORMAT_OPTIONS: ReadonlyArray<{
+  value: ChartDateFormat;
+  label: string;
+}> = [
+  { value: 'DD MMM', label: "GG MMM 'AA (es. 03 Lug '26)" },
+  { value: 'YYYY-MM-DD', label: 'AAAA-MM-GG' },
+  { value: 'DD/MM/YYYY', label: 'GG/MM/AAAA' },
+  { value: 'MM/DD/YYYY', label: 'MM/GG/AAAA' },
+];
 
 export type CanvasGridMode = 'both' | 'vert' | 'horz' | 'none';
+export type NavButtonsVisibility = 'hover' | 'always' | 'never';
 
 export interface ChartSymbolSettings {
   candleUpColor: string;
@@ -75,6 +117,7 @@ export interface ChartScalesSettings {
   showSymbolNameLabel: boolean;
   showSymbolLastValueLabel: boolean;
   showHighLowLabels: boolean;
+  showHighLowLines?: boolean;
   showBidAskLabels: boolean;
   showBidAskLines: boolean;
   showIndicatorNameLabels: boolean;
@@ -84,6 +127,7 @@ export interface ChartScalesSettings {
   noOverlappingLabels: boolean;
   showCurrencyUnit: boolean;
   dateFormat: ChartDateFormat;
+  showWeekdayOnTimeScaleLabels?: boolean;
 }
 
 export interface ChartCanvasSettings {
@@ -104,6 +148,7 @@ export interface ChartCanvasSettings {
   topMarginPct: number;
   bottomMarginPct: number;
   rightMarginBars: number;
+  navButtonsMode?: NavButtonsVisibility;
 }
 
 export interface ChartTradingSettings {
@@ -185,6 +230,7 @@ export const DEFAULT_CHART_SETTINGS_DARK: ChartSettings = {
     showSymbolNameLabel: false,
     showSymbolLastValueLabel: true,
     showHighLowLabels: false,
+    showHighLowLines: false,
     showBidAskLabels: false,
     showBidAskLines: false,
     showIndicatorNameLabels: false,
@@ -194,6 +240,7 @@ export const DEFAULT_CHART_SETTINGS_DARK: ChartSettings = {
     noOverlappingLabels: true,
     showCurrencyUnit: true,
     dateFormat: 'DD MMM',
+    showWeekdayOnTimeScaleLabels: true,
   },
   canvas: {
     bgType: 'solid',
@@ -213,6 +260,7 @@ export const DEFAULT_CHART_SETTINGS_DARK: ChartSettings = {
     topMarginPct: 10,
     bottomMarginPct: 8,
     rightMarginBars: 10,
+    navButtonsMode: 'hover',
   },
   trading: {
     showBuySellButtons: true,

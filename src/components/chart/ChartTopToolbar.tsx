@@ -7,13 +7,9 @@ import {
   Cloud,
   Copy,
   Download,
-  Eye,
   FilePlus2,
-  Flame,
   Keyboard,
-  Layers,
   LayoutGrid,
-  List,
   Maximize2,
   Menu,
   Minimize2,
@@ -23,8 +19,8 @@ import {
   Plus,
   Redo2,
   Rewind,
+  Search,
   Settings,
-  SlidersHorizontal,
   Star,
   Sun,
   Trash2,
@@ -41,13 +37,45 @@ import {
   type ChartType,
   type Timeframe,
 } from '../../types';
-import { SYMBOLS } from '../../data';
 import {
   useActivePane,
   useDrawings,
   useTradingView,
   type LayoutMode,
 } from '../../store';
+import {
+  loadMultiChartSync,
+  saveMultiChartSync,
+  type MultiChartSyncOptions,
+} from './MultiChartGrid';
+
+const FAV_TIMEFRAMES_KEY = 'tv_it_fav_timeframes_v1';
+const FAV_STYLES_KEY = 'tv_it_fav_styles_v1';
+
+function loadFavTimeframes(): Timeframe[] {
+  if (typeof window === 'undefined') return [...TIMEFRAMES];
+  try {
+    const raw = window.localStorage.getItem(FAV_TIMEFRAMES_KEY);
+    if (!raw) return [...TIMEFRAMES];
+    const arr = JSON.parse(raw) as Timeframe[];
+    const valid = arr.filter((t) => TIMEFRAMES.includes(t));
+    return valid.length > 0 ? valid : [...TIMEFRAMES];
+  } catch {
+    return [...TIMEFRAMES];
+  }
+}
+
+function loadFavStyles(): CanonicalChartType[] {
+  if (typeof window === 'undefined') return ['candles', 'line'];
+  try {
+    const raw = window.localStorage.getItem(FAV_STYLES_KEY);
+    if (!raw) return ['candles', 'line'];
+    const arr = JSON.parse(raw) as CanonicalChartType[];
+    return Array.isArray(arr) ? arr : ['candles', 'line'];
+  } catch {
+    return ['candles', 'line'];
+  }
+}
 
 export interface ChartTopToolbarProps {
   showDrawingBar: boolean;
@@ -229,12 +257,7 @@ export function ChartTopToolbar({
   const {
     theme,
     toggleTheme,
-    navigate,
     openModal,
-    rightPanel,
-    toggleRightPanel,
-    bottomPanel,
-    toggleBottomPanel,
     savedLayouts,
     activeLayoutId,
     activeLayoutName,
@@ -274,6 +297,9 @@ export function ChartTopToolbar({
   } = useDrawings();
 
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const [favTimeframes, setFavTimeframes] = useState<Timeframe[]>(loadFavTimeframes);
+  const [favStyles, setFavStyles] = useState<CanonicalChartType[]>(loadFavStyles);
+  const [syncOpts, setSyncOpts] = useState<MultiChartSyncOptions>(loadMultiChartSync);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({
     top: 42,
     left: 6,
@@ -650,6 +676,42 @@ export function ChartTopToolbar({
     }
   };
 
+  const toggleFavTimeframe = (tf: Timeframe) => {
+    setFavTimeframes((prev) => {
+      const exists = prev.includes(tf);
+      if (exists && prev.length <= 1) return prev;
+      const next = exists
+        ? prev.filter((item) => item !== tf)
+        : TIMEFRAMES.filter((t) => prev.includes(t) || t === tf);
+      try {
+        window.localStorage.setItem(FAV_TIMEFRAMES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const toggleFavStyle = (st: CanonicalChartType) => {
+    setFavStyles((prev) => {
+      const next = prev.includes(st)
+        ? prev.filter((item) => item !== st)
+        : [...prev, st];
+      try {
+        window.localStorage.setItem(FAV_STYLES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const toggleSyncOption = (key: keyof MultiChartSyncOptions) => {
+    const next = { ...syncOpts, [key]: !syncOpts[key] };
+    setSyncOpts(next);
+    saveMultiChartSync(next);
+  };
+
   const canonicalChartType = normalizeChartType(activePane.chartType);
   const currentStyleLabel =
     CHART_TYPES_META.find((s) => s.id === canonicalChartType)?.labelIt ?? 'Candele';
@@ -703,9 +765,11 @@ export function ChartTopToolbar({
 
         <div className="sc-tb-divider sc-desktop-only" />
 
-        {/* Timeframe Quick Buttons (desktop > 900px) + Compact Dropdown Trigger (<= 900px) */}
+        {/* Timeframe Quick Buttons (desktop > 900px, pinned favorites + active) + Dropdown Trigger */}
         <div className="sc-tf-group" role="group" aria-label="Intervalli temporali">
-          {TIMEFRAMES.map((tf) => (
+          {TIMEFRAMES.filter(
+            (tf) => favTimeframes.includes(tf) || activePane.timeframe === tf,
+          ).map((tf) => (
             <button
               key={tf}
               type="button"
@@ -769,12 +833,12 @@ export function ChartTopToolbar({
         <button
           type="button"
           className="sc-tb-btn sc-tablet-up"
-          title="Crea avviso (Alt+A)"
-          aria-label="Crea avviso"
+          title="Crea alert (Alt+A)"
+          aria-label="Crea alert"
           onClick={() => openModal('alert')}
         >
           <Bell size={15} />
-          <span className="sc-desktop-label">Avviso</span>
+          <span className="sc-desktop-label">Alert</span>
         </button>
 
         {/* Bar Replay */}
@@ -892,6 +956,17 @@ export function ChartTopToolbar({
 
         <div className="sc-tb-divider sc-desktop-only" />
 
+        {/* Quick Search (Ctrl+K) */}
+        <button
+          type="button"
+          className="sc-tb-btn sc-tb-btn--icon sc-desktop-only"
+          title="Ricerca rapida (Ctrl+K)"
+          aria-label="Ricerca rapida"
+          onClick={() => openModal('symbolSearch')}
+        >
+          <Search size={15} />
+        </button>
+
         {/* Chart Settings */}
         <button
           type="button"
@@ -924,43 +999,6 @@ export function ChartTopToolbar({
           onClick={() => openModal('snapshot')}
         >
           <Camera size={16} />
-        </button>
-
-        <div className="sc-tb-divider sc-tablet-up" />
-
-        {/* Watchlist (Lista titoli) Toggle — replaces right rail across all viewports */}
-        <button
-          type="button"
-          className={`sc-tb-btn sc-tb-btn--icon ${rightPanel === 'watchlist' ? 'sc-tb-btn--active' : ''}`}
-          title={rightPanel === 'watchlist' ? 'Chiudi Lista titoli' : 'Apri Lista titoli'}
-          aria-label="Lista titoli"
-          aria-pressed={rightPanel === 'watchlist'}
-          onClick={() => toggleRightPanel('watchlist')}
-        >
-          <List size={16} />
-        </button>
-
-        {/* Object Tree (Albero degli oggetti) Toggle */}
-        <button
-          type="button"
-          className={`sc-tb-btn sc-tb-btn--icon sc-tablet-up ${rightPanel === 'objectTree' ? 'sc-tb-btn--active' : ''}`}
-          title={rightPanel === 'objectTree' ? 'Chiudi Albero degli oggetti' : 'Apri Albero degli oggetti'}
-          aria-label="Albero degli oggetti"
-          aria-pressed={rightPanel === 'objectTree'}
-          onClick={() => toggleRightPanel('objectTree')}
-        >
-          <Layers size={15} />
-        </button>
-
-        {/* Trade Pill (opens/toggles Paper Trading Drawer) */}
-        <button
-          type="button"
-          className={`sc-trade-pill ${bottomPanel === 'trading' ? 'sc-tb-btn--active' : ''}`}
-          title="Pannello di trading / Paper Trading"
-          aria-pressed={bottomPanel === 'trading'}
-          onClick={() => toggleBottomPanel('trading')}
-        >
-          Trade
         </button>
       </div>
 
@@ -1029,81 +1067,6 @@ export function ChartTopToolbar({
               Barra strumenti preferiti (★)
             </span>
             <span className={`sc-switch ${showFavoritesBar ? 'sc-switch--on' : ''}`} />
-          </button>
-
-          <div className="sc-menu-sep" />
-
-          <button
-            type="button"
-            className={`sc-menu-item ${rightPanel === 'watchlist' ? 'sc-menu-item--active' : ''}`}
-            onClick={() => {
-              toggleRightPanel('watchlist');
-              setOpenMenu(null);
-            }}
-          >
-            <span className="sc-menu-item-left">
-              <List size={15} />
-              Lista titoli
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`sc-menu-item ${rightPanel === 'objectTree' ? 'sc-menu-item--active' : ''}`}
-            onClick={() => {
-              toggleRightPanel('objectTree');
-              setOpenMenu(null);
-            }}
-          >
-            <span className="sc-menu-item-left">
-              <Layers size={15} />
-              Albero degli oggetti
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className={`sc-menu-item ${rightPanel === 'data' ? 'sc-menu-item--active' : ''}`}
-            onClick={() => {
-              toggleRightPanel('data');
-              setOpenMenu(null);
-            }}
-          >
-            <span className="sc-menu-item-left">
-              <Eye size={15} />
-              Finestra dati
-            </span>
-            <span className="sc-menu-kbd">Alt + D</span>
-          </button>
-
-          <div className="sc-menu-sep" />
-
-          <button
-            type="button"
-            className="sc-menu-item"
-            onClick={() => {
-              setOpenMenu(null);
-              navigate('screener');
-            }}
-          >
-            <span className="sc-menu-item-left">
-              <SlidersHorizontal size={15} />
-              Screener ({SYMBOLS.length} strumenti)
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="sc-menu-item"
-            onClick={() => {
-              setOpenMenu(null);
-              navigate('heatmap');
-            }}
-          >
-            <span className="sc-menu-item-left">
-              <Flame size={15} />
-              Mappa di calore
-            </span>
           </button>
 
           <div className="sc-menu-sep" />
@@ -1241,27 +1204,44 @@ export function ChartTopToolbar({
         <div
           ref={menuRef}
           className="sc-menu"
-          style={{ top: menuPos.top, left: menuPos.left, width: 210 }}
+          style={{ top: menuPos.top, left: menuPos.left, width: 224 }}
           role="menu"
         >
           {TIMEFRAME_GROUPS.map((grp, idx) => (
             <div key={grp.title}>
               {idx > 0 && <div className="sc-menu-sep" />}
               <div className="sc-menu-section">{grp.title}</div>
-              {grp.items.map((tf) => (
-                <button
-                  key={tf}
-                  type="button"
-                  className={`sc-menu-item ${activePane.timeframe === tf ? 'sc-menu-item--active' : ''}`}
-                  onClick={() => {
-                    setTimeframe(tf);
-                    setOpenMenu(null);
-                  }}
-                >
-                  <span>{TIMEFRAME_LABELS_IT[tf]}</span>
-                  <span className="sc-menu-kbd">{tf}</span>
-                </button>
-              ))}
+              {grp.items.map((tf) => {
+                const isFav = favTimeframes.includes(tf);
+                return (
+                  <div key={tf} className="sc-menu-row-star">
+                    <button
+                      type="button"
+                      className={`sc-menu-item ${activePane.timeframe === tf ? 'sc-menu-item--active' : ''}`}
+                      onClick={() => {
+                        setTimeframe(tf);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      <span>{TIMEFRAME_LABELS_IT[tf]}</span>
+                      <span className="sc-menu-kbd">{tf}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`sc-menu-star-btn ${isFav ? 'is-fav' : ''}`}
+                      title={isFav ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+                      aria-label={`Preferito ${tf}`}
+                      aria-pressed={isFav}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavTimeframe(tf);
+                      }}
+                    >
+                      <Star size={13} fill={isFav ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -1271,29 +1251,46 @@ export function ChartTopToolbar({
         <div
           ref={menuRef}
           className="sc-menu"
-          style={{ top: menuPos.top, left: menuPos.left, width: 236 }}
+          style={{ top: menuPos.top, left: menuPos.left, width: 248 }}
           role="menu"
         >
           {CHART_STYLE_GROUPS.map((grp, idx) => (
             <div key={grp}>
               {idx > 0 && <div className="sc-menu-sep" />}
               <div className="sc-menu-section">{grp}</div>
-              {CHART_TYPES_META.filter((s) => s.group === grp).map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={`sc-menu-item ${canonicalChartType === s.id ? 'sc-menu-item--active' : ''}`}
-                  onClick={() => {
-                    setChartType(s.id);
-                    setOpenMenu(null);
-                  }}
-                >
-                  <span className="sc-menu-item-left">
-                    <ChartStyleIcon type={s.id} />
-                    <span>{s.labelIt}</span>
-                  </span>
-                </button>
-              ))}
+              {CHART_TYPES_META.filter((s) => s.group === grp).map((s) => {
+                const isFav = favStyles.includes(s.id);
+                return (
+                  <div key={s.id} className="sc-menu-row-star">
+                    <button
+                      type="button"
+                      className={`sc-menu-item ${canonicalChartType === s.id ? 'sc-menu-item--active' : ''}`}
+                      onClick={() => {
+                        setChartType(s.id);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      <span className="sc-menu-item-left">
+                        <ChartStyleIcon type={s.id} />
+                        <span>{s.labelIt}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`sc-menu-star-btn ${isFav ? 'is-fav' : ''}`}
+                      title={isFav ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+                      aria-label={`Preferito stile ${s.labelIt}`}
+                      aria-pressed={isFav}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavStyle(s.id);
+                      }}
+                    >
+                      <Star size={13} fill={isFav ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -1303,8 +1300,9 @@ export function ChartTopToolbar({
         <div
           ref={menuRef}
           className="sc-menu"
-          style={{ top: menuPos.top, left: menuPos.left, width: 230 }}
+          style={{ top: menuPos.top, left: menuPos.left, width: 244 }}
           role="menu"
+          aria-label="Impostazione layout"
         >
           <div className="sc-menu-section">Seleziona layout grafico</div>
           <div className="sc-layout-grid">
@@ -1323,6 +1321,31 @@ export function ChartTopToolbar({
               </button>
             ))}
           </div>
+
+          <div className="sc-menu-sep" />
+          <div className="sc-menu-section">SINCRONIZZA NEL LAYOUT</div>
+          {(
+            [
+              { key: 'symbol', label: 'Simbolo' },
+              { key: 'timeframe', label: 'Timeframe' },
+              { key: 'crosshair', label: 'Cursore' },
+              { key: 'time', label: 'Ora' },
+            ] as ReadonlyArray<{ key: keyof MultiChartSyncOptions; label: string }>
+          ).map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={syncOpts[item.key]}
+              className="sc-menu-item"
+              onClick={() => toggleSyncOption(item.key)}
+            >
+              <span>{item.label}</span>
+              <span
+                className={`sc-switch ${syncOpts[item.key] ? 'sc-switch--on' : ''}`}
+              />
+            </button>
+          ))}
         </div>
       )}
     </header>

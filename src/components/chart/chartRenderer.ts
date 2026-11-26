@@ -520,7 +520,7 @@ export function computeChartLayout(params: {
     bottom: mainH,
   };
 
-  const visibleBars = Math.max(8, Math.min(480, viewport.visibleBars));
+  const visibleBars = Math.max(8, Math.min(600, viewport.visibleBars));
   const maxAllowedRight =
     candles.length > 0
       ? candles.length + Math.max(10, visibleBars * 0.85)
@@ -743,12 +743,15 @@ const MONTHS_IT = [
 
 const tzFormatterCache = new Map<string, Intl.DateTimeFormat>();
 
+const WEEKDAYS_IT = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
+
 function getTzParts(sec: number, tz: ChartTimezoneSetting) {
   let fmt = tzFormatterCache.get(tz);
   if (!fmt) {
     try {
       fmt = new Intl.DateTimeFormat('en-GB', {
         timeZone: tz,
+        weekday: 'short',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -760,6 +763,7 @@ function getTzParts(sec: number, tz: ChartTimezoneSetting) {
     } catch {
       const d = new Date(sec * 1000);
       return {
+        weekday: WEEKDAYS_IT[d.getDay()],
         yyyy: String(d.getFullYear()),
         yy: String(d.getFullYear()).slice(-2),
         mmNum: String(d.getMonth() + 1).padStart(2, '0'),
@@ -778,7 +782,18 @@ function getTzParts(sec: number, tz: ChartTimezoneSetting) {
   const monthIdx = Math.max(0, Math.min(11, parseInt(map.month ?? '1', 10) - 1));
   const yyyy = map.year ?? '2026';
   const hh = map.hour === '24' ? '00' : (map.hour ?? '00');
+  const enDay = (map.weekday ?? '').toLowerCase().slice(0, 3);
+  const enDayMap: Record<string, string> = {
+    sun: 'dom',
+    mon: 'lun',
+    tue: 'mar',
+    wed: 'mer',
+    thu: 'gio',
+    fri: 'ven',
+    sat: 'sab',
+  };
   return {
+    weekday: enDayMap[enDay] ?? WEEKDAYS_IT[new Date(sec * 1000).getDay()],
     yyyy,
     yy: yyyy.slice(-2),
     mmNum: map.month ?? '01',
@@ -795,6 +810,7 @@ function formatAxisTime(
   full = false,
   dateFormat: ChartDateFormat = 'DD MMM',
   tz: ChartTimezoneSetting = 'Europe/Rome',
+  showWeekday = true,
 ): string {
   const p = getTzParts(sec, tz);
   const dateStr =
@@ -802,13 +818,16 @@ function formatAxisTime(
       ? `${p.yyyy}-${p.mmNum}-${p.dd}`
       : dateFormat === 'DD/MM/YYYY'
         ? `${p.dd}/${p.mmNum}/${p.yyyy}`
-        : `${p.dd} ${p.mon} '${p.yy}`;
+        : dateFormat === 'MM/DD/YYYY'
+          ? `${p.mmNum}/${p.dd}/${p.yyyy}`
+          : `${p.dd} ${p.mon} '${p.yy}`;
 
   if (full) {
+    const prefix = showWeekday ? `${p.weekday} ` : '';
     if (timeframe === '1D' || timeframe === '1W' || timeframe === '1M') {
-      return dateStr;
+      return `${prefix}${dateStr}`;
     }
-    return `${dateStr} ${p.hh}:${p.min}`;
+    return `${prefix}${dateStr} ${p.hh}:${p.min}`;
   }
 
   if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m') {
@@ -822,6 +841,7 @@ function formatAxisTime(
   }
   if (dateFormat === 'YYYY-MM-DD') return `${p.mmNum}-${p.dd}`;
   if (dateFormat === 'DD/MM/YYYY') return `${p.dd}/${p.mmNum}`;
+  if (dateFormat === 'MM/DD/YYYY') return `${p.mmNum}/${p.dd}`;
   return `${p.dd} ${p.mon}`;
 }
 
@@ -996,15 +1016,10 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
 
   const xStepBars = Math.max(1, Math.round(105 / Math.max(1, layout.barStepPx)));
   const xTickIndices: number[] = [];
-  const firstTick = Math.max(
-    0,
-    Math.ceil(layout.leftIndex / xStepBars) * xStepBars,
-  );
-  for (
-    let i = firstTick;
-    i <= Math.min(candles.length - 1, Math.ceil(layout.rightIndex));
-    i += xStepBars
-  ) {
+  const firstTick = Math.ceil(layout.leftIndex / xStepBars) * xStepBars;
+  const maxTickIdx = Math.ceil(layout.rightIndex);
+  for (let i = firstTick; i <= maxTickIdx; i += xStepBars) {
+    if (i < 0 && candles.length === 0) continue;
     xTickIndices.push(i);
   }
 
@@ -1830,6 +1845,34 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     ctx.restore();
   }
 
+  // Visible High / Low Price Lines (Linee prezzo max e min)
+  let visHigh = -Infinity;
+  let visLow = Infinity;
+  if (scalesCfg.showHighLowLabels || scalesCfg.showHighLowLines) {
+    for (let i = Math.max(0, startIdx); i <= Math.min(rawCandles.length - 1, endIdx); i++) {
+      const c = rawCandles[i];
+      if (!c) continue;
+      if (c.high > visHigh) visHigh = c.high;
+      if (c.low < visLow) visLow = c.low;
+    }
+  }
+
+  if (scalesCfg.showHighLowLines && Number.isFinite(visHigh) && Number.isFinite(visLow)) {
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    const yHi = Math.round(priceToY(visHigh, layout)) + 0.5;
+    const yLo = Math.round(priceToY(visLow, layout)) + 0.5;
+    ctx.strokeStyle = 'rgba(41, 98, 255, 0.72)';
+    ctx.beginPath();
+    ctx.moveTo(layout.plotLeft, yHi);
+    ctx.lineTo(layout.plotRight, yHi);
+    ctx.moveTo(layout.plotLeft, yLo);
+    ctx.lineTo(layout.plotRight, yLo);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   if (scalesCfg.showBidAskLines && bidPrice != null && askPrice != null) {
     const yBid = Math.round(priceToY(bidPrice, layout)) + 0.5;
     const yAsk = Math.round(priceToY(askPrice, layout)) + 0.5;
@@ -2179,6 +2222,24 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     );
   }
 
+  // Visible High / Low Price Axis Badges (Etichette prezzo max e min)
+  if (scalesCfg.showHighLowLabels && Number.isFinite(visHigh) && Number.isFinite(visLow)) {
+    drawAxisBadge(
+      priceToY(visHigh, layout),
+      '#2962ff',
+      formatPrice(visHigh, effectivePrecision),
+      null,
+      'Max',
+    );
+    drawAxisBadge(
+      priceToY(visLow, layout),
+      '#2962ff',
+      formatPrice(visLow, effectivePrecision),
+      null,
+      'Min',
+    );
+  }
+
   // Bid / Ask Axis Badges
   if (scalesCfg.showBidAskLabels && bidPrice != null && askPrice != null) {
     drawAxisBadge(
@@ -2226,21 +2287,136 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     }
   }
 
-  // Time Axis Labels
-  ctx.fillStyle = axisTextColor;
-  ctx.font = `${scaleFontPx}px ${FONT_FAMILY}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const idx of xTickIndices) {
-    const c = candles[idx];
-    if (!c) continue;
-    const x = indexToX(idx, layout);
-    if (x < layout.plotLeft + 28 || x > layout.plotRight - 28) continue;
-    ctx.fillText(
-      formatAxisTime(c.time, timeframe, false, scalesCfg.dateFormat, symCfg.timezone),
-      x,
-      layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
-    );
+  // Time Axis Labels (renders historical AND virtual future whitespace dates just like TradingView!)
+  if (hasCandles) {
+    ctx.fillStyle = axisTextColor;
+    ctx.font = `${scaleFontPx}px ${FONT_FAMILY}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const idx of xTickIndices) {
+      const x = indexToX(idx, layout);
+      if (x < layout.plotLeft + 28 || x > layout.plotRight - 28) continue;
+      const tickTime = indexToTime(idx, rawCandles);
+      ctx.fillText(
+        formatAxisTime(tickTime, timeframe, false, scalesCfg.dateFormat, symCfg.timezone),
+        x,
+        layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
+      );
+    }
+  }
+
+  // ======================== 11b. ACTIVE DRAFT / SELECTED DRAWING BLUE AXIS BANDS & PILLS (1:1 TradingView) ========================
+  const activeAxisDrawing = !hideAllDrawings
+    ? (draftDrawing ??
+      (selectedDrawingId
+        ? drawings.find((d) => d.id === selectedDrawingId && d.visible) ?? null
+        : null))
+    : null;
+
+  if (hasCandles && activeAxisDrawing && activeAxisDrawing.points.length > 0) {
+    const anchorPts = activeAxisDrawing.points.map((pt) => ({
+      time: pt.time,
+      price: pt.price,
+      x: indexToX(timeToIndex(pt.time, rawCandles), layout),
+      y: priceToY(pt.price, layout),
+    }));
+
+    const ys = anchorPts
+      .map((p) => p.y)
+      .filter((y) => Number.isFinite(y));
+    const xs = anchorPts
+      .map((p) => p.x)
+      .filter((x) => Number.isFinite(x));
+
+    const bx = priceScalePosition === 'left' ? 0 : layout.priceAxisLeft + 1;
+    const bw = layout.priceAxisWidth - 1;
+
+    // Translucent blue span highlight band on Price Axis & Time Axis when >= 2 points span a range
+    if (ys.length >= 2) {
+      const minY = Math.max(layout.mainRect.top, Math.min(...ys));
+      const maxY = Math.min(layout.mainRect.bottom, Math.max(...ys));
+      if (maxY - minY > 1) {
+        ctx.fillStyle = 'rgba(41, 98, 255, 0.20)';
+        ctx.fillRect(bx, minY, bw, maxY - minY);
+      }
+    }
+    if (xs.length >= 2) {
+      const minX = Math.max(layout.plotLeft, Math.min(...xs));
+      const maxX = Math.min(layout.plotRight, Math.max(...xs));
+      if (maxX - minX > 1) {
+        ctx.fillStyle = 'rgba(41, 98, 255, 0.20)';
+        ctx.fillRect(minX, layout.timeAxisTop + 1, maxX - minX, TIME_AXIS_HEIGHT - 2);
+      }
+    }
+
+    // Solid #2962ff Price & Date pills for distinct anchor points (always visible immediately on Click 1 / Tap 1!)
+    const drawnPriceYs: number[] = [];
+    const drawnTimeXs: number[] = [];
+    for (const pt of anchorPts) {
+      if (
+        pt.y >= layout.mainRect.top &&
+        pt.y <= layout.mainRect.bottom &&
+        !drawnPriceYs.some((prevY) => Math.abs(prevY - pt.y) < 4)
+      ) {
+        drawnPriceYs.push(pt.y);
+        const pLabel =
+          layout.scaleMode === 'percent' || layout.scaleMode === 'indexed100'
+            ? formatAxisPrice(
+                toScaledValue(pt.price, layout.scaleMode, layout.basePrice),
+                layout.scaleMode,
+                layout.basePrice,
+                effectivePrecision,
+              )
+            : formatPrice(pt.price, effectivePrecision);
+        ctx.fillStyle = '#2962ff';
+        ctx.fillRect(bx, pt.y - 10, bw, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `600 ${tickFontPx}px ${FONT_FAMILY}`;
+        ctx.textAlign = priceScalePosition === 'left' ? 'right' : 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pLabel, tickTextX, pt.y);
+      }
+
+      if (
+        pt.x >= layout.plotLeft &&
+        pt.x <= layout.plotRight &&
+        !drawnTimeXs.some((prevX) => Math.abs(prevX - pt.x) < 12)
+      ) {
+        drawnTimeXs.push(pt.x);
+        const tLabel = formatAxisTime(
+          pt.time,
+          timeframe,
+          true,
+          scalesCfg.dateFormat,
+          symCfg.timezone,
+          scalesCfg.showWeekdayOnTimeScaleLabels !== false,
+        );
+        ctx.font = `600 11px ${FONT_FAMILY}`;
+        const tw = ctx.measureText(tLabel).width + 16;
+        const pillX = Math.max(
+          layout.plotLeft + 2,
+          Math.min(layout.plotRight - tw - 2, pt.x - tw / 2),
+        );
+        ctx.fillStyle = '#2962ff';
+        drawRoundedRectPath(
+          ctx,
+          pillX,
+          layout.timeAxisTop + 3,
+          tw,
+          TIME_AXIS_HEIGHT - 6,
+          3,
+        );
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          tLabel,
+          pillX + tw / 2,
+          layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
+        );
+      }
+    }
   }
 
   // ======================== 12. INTERACTIVE CROSSHAIR, AXIS PILLS & `+` BUTTON ========================
@@ -2328,6 +2504,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         true,
         scalesCfg.dateFormat,
         symCfg.timezone,
+        scalesCfg.showWeekdayOnTimeScaleLabels !== false,
       );
       ctx.font = `600 11px ${FONT_FAMILY}`;
       const tw = ctx.measureText(timeStr).width + 16;
@@ -2419,6 +2596,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         true,
         scalesCfg.dateFormat,
         symCfg.timezone,
+        scalesCfg.showWeekdayOnTimeScaleLabels !== false,
       );
       ctx.font = `600 11px ${FONT_FAMILY}`;
       const tw = ctx.measureText(timeStr).width + 16;

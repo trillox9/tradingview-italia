@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlignLeft,
-  ArrowLeftRight,
   Bell,
   CandlestickChart,
   ChevronDown,
@@ -14,6 +13,8 @@ import {
   X,
 } from 'lucide-react';
 import {
+  CHART_DATE_FORMAT_OPTIONS,
+  CHART_TIMEZONE_OPTIONS,
   CHART_TYPES_META,
   normalizeChartType,
   type CanvasGridMode,
@@ -24,6 +25,7 @@ import {
   type ChartTimezoneSetting,
   type ChartType,
   type LineStyle,
+  type NavButtonsVisibility,
   type PriceScalePosition,
   type StatusLineTitleMode,
 } from '../../types';
@@ -38,13 +40,27 @@ export interface ChartSettingsModalProps {
   onClose?: () => void;
 }
 
-type SettingsTab =
+export type SettingsTab =
   | 'symbol'
   | 'statusLine'
   | 'scales'
   | 'canvas'
-  | 'trading'
   | 'alerts';
+
+let pendingSettingsTab: SettingsTab | null = null;
+
+export function setPendingSettingsTab(tab: SettingsTab | null): void {
+  pendingSettingsTab = tab;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('tv-open-settings-tab', (ev: Event) => {
+    const detail = (ev as CustomEvent<{ tab?: SettingsTab }>).detail;
+    if (detail?.tab) {
+      pendingSettingsTab = detail.tab;
+    }
+  });
+}
 
 interface SettingsSnapshot {
   chartSettings: ChartSettings;
@@ -261,11 +277,28 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
     else closeModal('settings');
   }, [closeModal, onClose]);
 
-  const [tab, setTab] = useState<SettingsTab>('symbol');
+  const [tab, setTab] = useState<SettingsTab>(() => {
+    const initial = pendingSettingsTab ?? 'symbol';
+    pendingSettingsTab = null;
+    return initial;
+  });
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false);
   const templateRef = useRef<HTMLDivElement | null>(null);
   const snapshotRef = useRef<SettingsSnapshot | null>(null);
   const wasVisibleRef = useRef(false);
+
+  // Support deep-linking from context menus (`Altre impostazioni…` -> `scales`, canvas `Impostazioni…` -> `canvas`)
+  useEffect(() => {
+    const onOpenTab = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ tab?: SettingsTab }>).detail;
+      if (detail?.tab) {
+        pendingSettingsTab = null;
+        setTab(detail.tab);
+      }
+    };
+    window.addEventListener('tv-open-settings-tab', onOpenTab);
+    return () => window.removeEventListener('tv-open-settings-tab', onOpenTab);
+  }, []);
 
   // Capture clean snapshot when dialog opens so `Annulla` reverts every live change
   useEffect(() => {
@@ -325,16 +358,15 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
 
   if (!visible) return null;
 
-  const { symbol, statusLine, scales, canvas, trading, alerts } = chartSettings;
+  const { symbol, statusLine, scales, canvas, alerts } = chartSettings;
   const canonicalChartType = normalizeChartType(activePane.chartType);
 
   const tabs: { id: SettingsTab; label: string; icon: typeof Settings }[] = [
     { id: 'symbol', label: 'Simbolo', icon: CandlestickChart },
-    { id: 'statusLine', label: 'Linea di stato', icon: AlignLeft },
+    { id: 'statusLine', label: 'Legenda', icon: AlignLeft },
     { id: 'scales', label: 'Scale e linee', icon: Ruler },
     { id: 'canvas', label: 'Canvas', icon: Palette },
-    { id: 'trading', label: 'Trading', icon: ArrowLeftRight },
-    { id: 'alerts', label: 'Avvisi', icon: Bell },
+    { id: 'alerts', label: 'Alert', icon: Bell },
   ];
 
   return (
@@ -648,10 +680,11 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
                         })
                       }
                     >
-                      <option value="Europe/Rome">Europe/Rome (UTC+1)</option>
-                      <option value="UTC">UTC</option>
-                      <option value="America/New_York">America/New_York</option>
-                      <option value="Asia/Tokyo">Asia/Tokyo</option>
+                      {CHART_TIMEZONE_OPTIONS.map((tz) => (
+                        <option key={tz.value} value={tz.value}>
+                          {tz.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -742,19 +775,6 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
                         updateChartSettings({ statusLine: { showVolume } });
                         updateActivePane({ showVolume });
                       }}
-                    />
-                  </div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Pulsanti Acquista/Vendi"
-                      checked={statusLine.showBuySellButtons}
-                      onChange={(showBuySellButtons) =>
-                        updateChartSettings({
-                          statusLine: { showBuySellButtons },
-                          trading: { showBuySellButtons },
-                        })
-                      }
                     />
                   </div>
 
@@ -944,10 +964,19 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
                   </div>
                   <div className="tvs-row">
                     <CheckboxItem
-                      label="Valore massimo e minimo"
+                      label="Valori prezzo max e min"
                       checked={scales.showHighLowLabels}
                       onChange={(showHighLowLabels) =>
                         updateChartSettings({ scales: { showHighLowLabels } })
+                      }
+                    />
+                  </div>
+                  <div className="tvs-row">
+                    <CheckboxItem
+                      label="Linee prezzo max e min"
+                      checked={Boolean(scales.showHighLowLines)}
+                      onChange={(showHighLowLines) =>
+                        updateChartSettings({ scales: { showHighLowLines } })
                       }
                     />
                   </div>
@@ -1043,10 +1072,23 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
                         })
                       }
                     >
-                      <option value="DD MMM">GG MMM (es. 25 Nov)</option>
-                      <option value="YYYY-MM-DD">AAAA-MM-GG</option>
-                      <option value="DD/MM/YYYY">GG/MM/AAAA</option>
+                      {CHART_DATE_FORMAT_OPTIONS.map((df) => (
+                        <option key={df.value} value={df.value}>
+                          {df.label}
+                        </option>
+                      ))}
                     </select>
+                  </div>
+                  <div className="tvs-row">
+                    <CheckboxItem
+                      label="Giorno della settimana sulle etichette"
+                      checked={scales.showWeekdayOnTimeScaleLabels !== false}
+                      onChange={(showWeekdayOnTimeScaleLabels) =>
+                        updateChartSettings({
+                          scales: { showWeekdayOnTimeScaleLabels },
+                        })
+                      }
+                    />
                   </div>
                 </>
               )}
@@ -1358,84 +1400,32 @@ export function ChartSettingsModal({ isOpen, onClose }: ChartSettingsModalProps)
                       }}
                     />
                   </div>
-                </>
-              )}
 
-              {/* ================= TAB 5: TRADING ================= */}
-              {tab === 'trading' && (
-                <>
-                  <div className="tvs-section-title">Ordini rapidi</div>
+                  <div className="tvs-section-title">Pulsanti</div>
 
                   <div className="tvs-row">
-                    <CheckboxItem
-                      label="Pulsanti Acquista/Vendi"
-                      checked={trading.showBuySellButtons}
-                      onChange={(showBuySellButtons) =>
+                    <span className="tvs-row-label">Pulsanti di navigazione</span>
+                    <select
+                      aria-label="Pulsanti di navigazione"
+                      className="tvs-select"
+                      value={canvas.navButtonsMode ?? 'hover'}
+                      onChange={(e) =>
                         updateChartSettings({
-                          trading: { showBuySellButtons },
-                          statusLine: { showBuySellButtons },
+                          canvas: {
+                            navButtonsMode: e.target.value as NavButtonsVisibility,
+                          },
                         })
                       }
-                    />
-                  </div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Posizionamento ordini istantaneo"
-                      checked={trading.instantOrderPlacement}
-                      onChange={(instantOrderPlacement) =>
-                        updateChartSettings({
-                          trading: { instantOrderPlacement },
-                        })
-                      }
-                    />
-                  </div>
-
-                  <div className="tvs-section-title">Aspetto sul grafico</div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Posizioni sul grafico"
-                      checked={trading.showPositions}
-                      onChange={(showPositions) =>
-                        updateChartSettings({ trading: { showPositions } })
-                      }
-                    />
-                  </div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Ordini sul grafico"
-                      checked={trading.showOrders}
-                      onChange={(showOrders) =>
-                        updateChartSettings({ trading: { showOrders } })
-                      }
-                    />
-                  </div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Esecuzioni"
-                      checked={trading.showExecutions}
-                      onChange={(showExecutions) =>
-                        updateChartSettings({ trading: { showExecutions } })
-                      }
-                    />
-                  </div>
-
-                  <div className="tvs-row">
-                    <CheckboxItem
-                      label="Estendi linee a sinistra"
-                      checked={trading.extendLinesLeft}
-                      onChange={(extendLinesLeft) =>
-                        updateChartSettings({ trading: { extendLinesLeft } })
-                      }
-                    />
+                    >
+                      <option value="hover">Visibile al passaggio del mouse</option>
+                      <option value="always">Sempre visibile</option>
+                      <option value="never">Sempre invisibile</option>
+                    </select>
                   </div>
                 </>
               )}
 
-              {/* ================= TAB 6: AVVISI ================= */}
+              {/* ================= TAB 5: ALERT ================= */}
               {tab === 'alerts' && (
                 <>
                   <div className="tvs-section-title">Linee e visibilità</div>

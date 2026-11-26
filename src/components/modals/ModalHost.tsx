@@ -47,8 +47,9 @@ export function ModalHost() {
         return;
       }
 
-      // Escape closes any open modal, or resets chart tool to crosshair
+      // Escape closes any open modal, or resets chart tool to crosshair (unless already handled by draft/menu)
       if (key === 'Escape') {
+        if (e.defaultPrevented) return;
         if (editingIndicatorId !== null) {
           e.preventDefault();
           closeIndicatorSettings();

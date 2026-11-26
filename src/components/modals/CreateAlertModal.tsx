@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { BellPlus, CheckCircle2, X } from 'lucide-react';
+import { BellPlus, CheckCircle2, Pause, Play, Trash2, X } from 'lucide-react';
 import type { AlertCondition, AlertTarget } from '../../types';
 import { ALERT_TARGET_LABELS_IT } from '../../engine';
 import { formatPercent, formatPrice } from '../../data';
@@ -26,10 +26,10 @@ const UI_CONDITION_OPTIONS: { value: UiAlertCondition; label: string }[] = [
 ];
 
 export function CreateAlertModal({ isOpen, onClose }: CreateAlertModalProps) {
-  const { modals, closeModal, setRightPanel } = useTradingView();
+  const { modals, closeModal } = useTradingView();
   const { activeSymbol } = useActivePane();
   const { quotes } = useQuotes();
-  const { createAlert } = useAlerts();
+  const { alerts, createAlert, toggleAlert, deleteAlert } = useAlerts();
 
   const visible = isOpen ?? modals.alert;
   const handleClose = useCallback(() => {
@@ -116,7 +116,6 @@ export function CreateAlertModal({ isOpen, onClose }: CreateAlertModalProps) {
     });
 
     setSaved(true);
-    setRightPanel('alerts');
     window.setTimeout(() => {
       handleClose();
     }, 350);
@@ -308,9 +307,59 @@ export function CreateAlertModal({ isOpen, onClose }: CreateAlertModalProps) {
               className="tvm-textarea"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder={`Avviso su ${activeSymbol.ticker}: prezzo ha raggiunto ${valueStr || formatPrice(currentPrice, activeSymbol.precision)}`}
+              placeholder={`Alert su ${activeSymbol.ticker}: prezzo ha raggiunto ${valueStr || formatPrice(currentPrice, activeSymbol.precision)}`}
             />
           </div>
+
+          {alerts.length > 0 && (
+            <div className="tvm-field">
+              <span className="tvm-label">Alert locali ({alerts.length})</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 140, overflowY: 'auto' }}>
+                {alerts.map((al) => (
+                  <div
+                    key={al.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--tv-border, #303030)',
+                      fontSize: '0.78rem',
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {al.name || `${al.symbol} @ ${al.value}`}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', opacity: 0.72 }}>
+                        {al.symbol} · {al.status === 'active' ? 'Attivo' : al.status === 'paused' ? 'In pausa' : 'Scattato'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <button
+                        type="button"
+                        className="tvm-close-btn"
+                        aria-label={al.status === 'active' ? 'Metti in pausa alert' : 'Riprendi alert'}
+                        onClick={() => toggleAlert(al.id)}
+                      >
+                        {al.status === 'active' ? <Pause size={13} /> : <Play size={13} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="tvm-close-btn"
+                        aria-label="Elimina alert"
+                        onClick={() => deleteAlert(al.id)}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="tvm-footer">

@@ -863,13 +863,21 @@ export function TradingViewProvider({
   );
 
   // ---- Replay Controls ----
+  const pendingReplayRef = useRef<{ requested: boolean; barIndex?: number }>({
+    requested: false,
+  });
+
   const startReplay = useCallback(
     (barIndex?: number) => {
       const total = candles.length;
-      if (total < 10) return;
-      const defaultIdx = Math.max(20, Math.floor(total * 0.65));
+      if (total < 4) {
+        pendingReplayRef.current = { requested: true, barIndex };
+        return;
+      }
+      pendingReplayRef.current = { requested: false };
+      const defaultIdx = Math.max(2, Math.floor(total * 0.65));
       const clamped = Math.max(
-        5,
+        1,
         Math.min(total - 2, barIndex ?? defaultIdx),
       );
       setReplay((prev) => ({
@@ -881,6 +889,15 @@ export function TradingViewProvider({
     },
     [candles.length],
   );
+
+  // Fulfill a Replay click that happened while timeframe/symbol candles were still hydrating
+  useEffect(() => {
+    if (pendingReplayRef.current.requested && candles.length >= 4) {
+      const idx = pendingReplayRef.current.barIndex;
+      pendingReplayRef.current = { requested: false };
+      startReplay(idx);
+    }
+  }, [candles.length, startReplay]);
 
   const stepReplay = useCallback(
     (delta = 1) => {

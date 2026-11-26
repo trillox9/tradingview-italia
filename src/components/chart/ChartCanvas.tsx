@@ -7,8 +7,10 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ChevronsRight,
   Eye,
   EyeOff,
@@ -50,8 +52,20 @@ import {
   resolveRealCandlesSmart,
 } from '../../data';
 import {
+  MAX_VISIBLE_BARS,
+  MIN_VISIBLE_BARS,
+  applyPriceAxisDragZoom,
+  applyShiftWheelPan,
+  applyTimeAxisDragZoom,
+  applyWheelZoom,
+  clampVisibleBars,
+  computeMaxRightBound,
+  createPastedDrawing,
+  defaultVisibleBarsForWidth,
   distanceBetween,
+  getCopiedDrawing,
   hitTestDrawing,
+  setCopiedDrawing,
   snapPriceToCandle,
   toHeikinAshi,
 } from '../../engine';
@@ -62,12 +76,12 @@ import {
   useActivePane,
   useAlerts,
   useDrawings,
-  usePaperTrading,
   useQuotes,
   useTradingView,
   type ChartPaneState,
   type RangePreset,
 } from '../../store';
+import { readLongPressValuesEnabled } from './DrawingToolbar';
 import {
   COMPARE_COLORS,
   computePriceAxisWidth,
@@ -108,6 +122,7 @@ export interface ChartContextMenuPayload {
   timestamp: number;
   drawingId?: string;
   paneIndex: number;
+  priceToBarRatio?: number;
 }
 
 export interface PriceAxisPlusPayload {
@@ -138,8 +153,6 @@ export interface ChartCanvasProps {
   onCrosshairTimeChange?: (timestamp: number | null) => void;
 }
 
-const MIN_VISIBLE_BARS = 8;
-const MAX_VISIBLE_BARS = 480;
 const DRAWING_SWATCHES = ['#2962ff', '#089981', '#f23645', '#ff9800', '#ab47bc', '#ffffff'];
 
 const TEXT_PROMPT_TOOLS = new Set<CanonicalDrawingToolType>([
@@ -210,8 +223,65 @@ function finalizePositionDrawing(drawing: DrawingObject): DrawingObject {
   return drawing;
 }
 
+const ANGLE_SNAP_TOOLS = new Set<CanonicalDrawingToolType>([
+  'trendline',
+  'ray',
+  'info_line',
+  'extended_line',
+  'trend_angle',
+  'arrow_line',
+  'arrow_marker',
+  'channel',
+  'flat_channel',
+  'disjoint_channel',
+  'path',
+]);
+
+const SQUARE_SNAP_TOOLS = new Set<CanonicalDrawingToolType>([
+  'rectangle',
+  'rotated_rectangle',
+  'ellipse',
+  'circle',
+]);
+
+function constrainScreenWithShift(
+  anchorPt: DrawingPoint,
+  rawX: number,
+  rawY: number,
+  tool: CanonicalDrawingToolType,
+  layout: ChartLayoutMetrics,
+  candles: readonly Candle[],
+): { x: number; y: number } {
+  const ax = indexToX(timeToIndex(anchorPt.time, candles), layout);
+  const ay = priceToY(anchorPt.price, layout);
+  const dx = rawX - ax;
+  const dy = rawY - ay;
+  if (Math.hypot(dx, dy) < 2) return { x: rawX, y: rawY };
+
+  if (ANGLE_SNAP_TOOLS.has(tool)) {
+    const dist = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx);
+    const step = Math.PI / 4; // 0°, 45°, 90°, 135°, 180°
+    const snappedAngle = Math.round(angle / step) * step;
+    return {
+      x: ax + Math.cos(snappedAngle) * dist,
+      y: ay + Math.sin(snappedAngle) * dist,
+    };
+  }
+
+  if (SQUARE_SNAP_TOOLS.has(tool)) {
+    const side = Math.max(Math.abs(dx), Math.abs(dy));
+    return {
+      x: ax + (dx >= 0 ? side : -side),
+      y: ay + (dy >= 0 ? side : -side),
+    };
+  }
+
+  return { x: rawX, y: rawY };
+}
+
 function maxRightBound(candleCount: number, visibleBars: number): number {
-  return Math.max(visibleBars, candleCount + visibleBars * 0.85);
+  return computeMaxRightBound(candleCount, visibleBars);
 }
 
 export function ChartCanvas({
@@ -233,7 +303,6 @@ export function ChartCanvas({
   const {
     theme,
     openModal,
-    setBottomPanel,
     chartSettings,
     openIndicatorSettings,
   } = useTradingView();
@@ -274,7 +343,6 @@ export function ChartCanvas({
     deleteDrawing,
   } = useDrawings();
 
-  const { paperAccount, placeOrder } = usePaperTrading();
   const { alerts } = useAlerts();
 
   const symbol = useMemo(() => resolveSymbolInfo(pane.symbolId), [pane.symbolId]);
@@ -587,14 +655,26 @@ export function ChartCanvas({
     undefined,
   );
 
-  // Viewport state (pan/zoom)
+  // Viewport state (pan/zoom — barSpacing-proportional across Desktop & Mobile!)
+  const effectiveScaleMode =
+    pane.compareSymbols.length > 0 && pane.scaleMode !== 'indexed100'
+      ? 'percent'
+      : pane.scaleMode;
+  const dynamicPriceAxisWidth = computePriceAxisWidth(
+    effectivePrecision,
+    effectiveScaleMode,
+    chartSettings.canvas.scaleFontSize,
+  );
+
   const rightMarginBars = Math.max(
     0,
     Math.min(60, chartSettings.canvas.rightMarginBars ?? 10),
   );
+  const initialPlotW = Math.max(240, size.width - dynamicPriceAxisWidth);
+  const defaultBars = defaultVisibleBarsForWidth(initialPlotW);
   const [viewport, setViewport] = useState<ViewportState>(() => ({
-    visibleBars: 120,
-    rightIndex: Math.max(120, rawCandles.length + rightMarginBars),
+    visibleBars: defaultBars,
+    rightIndex: Math.max(defaultBars * 0.5, rawCandles.length + rightMarginBars),
     yZoom: 1,
     yOffset: 0,
     manualMin: null,
@@ -603,6 +683,28 @@ export function ChartCanvas({
 
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
+  const prevPlotWidthRef = useRef<number>(initialPlotW);
+
+  // Preserve visual candle width (barSpacing) when container resizes (e.g. Desktop <-> Mobile or sidebar toggle)
+  useEffect(() => {
+    const nextPlotW = Math.max(120, size.width - dynamicPriceAxisWidth);
+    const prevPlotW = prevPlotWidthRef.current;
+    if (Math.abs(nextPlotW - prevPlotW) > 4) {
+      prevPlotWidthRef.current = nextPlotW;
+      setViewport((vp) => {
+        const curSpacing = Math.max(1.4, prevPlotW / Math.max(8, vp.visibleBars));
+        const nextBars = clampVisibleBars(nextPlotW / curSpacing, nextPlotW);
+        return {
+          ...vp,
+          visibleBars: nextBars,
+          rightIndex: Math.max(
+            6,
+            Math.min(maxRightBound(rawCandles.length, nextBars), vp.rightIndex),
+          ),
+        };
+      });
+    }
+  }, [size.width, dynamicPriceAxisWidth, rawCandles.length]);
 
   // Clear manual vertical bounds whenever autoScale turns ON or scaleMode/symbol/timeframe changes
   useEffect(() => {
@@ -643,9 +745,11 @@ export function ChartCanvas({
   const resetChartView = useCallback(() => {
     zoomHistoryRef.current = [];
     onZoomHistoryChange?.(false, handleZoomOut);
+    const plotW = Math.max(120, size.width - dynamicPriceAxisWidth);
+    const targetBars = defaultVisibleBarsForWidth(plotW);
     setViewport({
-      visibleBars: 120,
-      rightIndex: Math.max(120, rawCandles.length + rightMarginBars),
+      visibleBars: targetBars,
+      rightIndex: Math.max(targetBars * 0.5, rawCandles.length + rightMarginBars),
       yZoom: 1,
       yOffset: 0,
       manualMin: null,
@@ -653,6 +757,8 @@ export function ChartCanvas({
     });
     updatePane(paneIndex, { autoScale: true });
   }, [
+    size.width,
+    dynamicPriceAxisWidth,
     rawCandles.length,
     rightMarginBars,
     paneIndex,
@@ -663,24 +769,20 @@ export function ChartCanvas({
 
   const zoomAroundCenter = useCallback(
     (factor: number) => {
+      const plotW = Math.max(120, size.width - dynamicPriceAxisWidth);
       setViewport((vp) => {
-        const nextBars = Math.max(
-          MIN_VISIBLE_BARS,
-          Math.min(MAX_VISIBLE_BARS, vp.visibleBars * factor),
-        );
-        const centerIndex = vp.rightIndex - vp.visibleBars * 0.5;
-        const nextRight = centerIndex + nextBars * 0.5;
+        const nextBars = clampVisibleBars(vp.visibleBars * factor, plotW);
         return {
           ...vp,
           visibleBars: nextBars,
           rightIndex: Math.max(
             6,
-            Math.min(maxRightBound(rawCandles.length, nextBars), nextRight),
+            Math.min(maxRightBound(rawCandles.length, nextBars), vp.rightIndex),
           ),
         };
       });
     },
-    [rawCandles.length],
+    [size.width, dynamicPriceAxisWidth, rawCandles.length],
   );
 
   const jumpToRealtime = useCallback(() => {
@@ -723,6 +825,23 @@ export function ChartCanvas({
     };
     const onJumpEndEv = () => jumpToRealtime();
     const onResetViewEv = () => resetChartView();
+    const onGotoDateEv = (ev: Event) => {
+      const ts = (ev as CustomEvent<{ timestampSec?: number }>).detail?.timestampSec;
+      if (typeof ts !== 'number' || !Number.isFinite(ts) || rawCandles.length === 0) {
+        return;
+      }
+      const targetIdx = timeToIndex(ts, rawCandles);
+      setViewport((vp) => ({
+        ...vp,
+        rightIndex: Math.max(
+          6,
+          Math.min(
+            maxRightBound(rawCandles.length, vp.visibleBars),
+            targetIdx + vp.visibleBars * 0.5,
+          ),
+        ),
+      }));
+    };
 
     window.addEventListener('tv-chart-zoom-in', onZoomInEv);
     window.addEventListener('tv-chart-zoom-out', onZoomOutEv);
@@ -731,6 +850,7 @@ export function ChartCanvas({
     window.addEventListener('tv-chart-jump-start', onJumpStartEv);
     window.addEventListener('tv-chart-jump-end', onJumpEndEv);
     window.addEventListener('tv-chart-reset-view', onResetViewEv);
+    window.addEventListener('tv-chart-goto-date', onGotoDateEv);
     return () => {
       window.removeEventListener('tv-chart-zoom-in', onZoomInEv);
       window.removeEventListener('tv-chart-zoom-out', onZoomOutEv);
@@ -739,8 +859,9 @@ export function ChartCanvas({
       window.removeEventListener('tv-chart-jump-start', onJumpStartEv);
       window.removeEventListener('tv-chart-jump-end', onJumpEndEv);
       window.removeEventListener('tv-chart-reset-view', onResetViewEv);
+      window.removeEventListener('tv-chart-goto-date', onGotoDateEv);
     };
-  }, [isActivePane, rawCandles.length, zoomAroundCenter, jumpToRealtime, resetChartView]);
+  }, [isActivePane, rawCandles, zoomAroundCenter, jumpToRealtime, resetChartView]);
 
   const paneSource: DataSourceKind = isActivePane
     ? (paneDataSources[paneIndex] ?? liveQuote?.source ?? 'simulated')
@@ -753,16 +874,6 @@ export function ChartCanvas({
       secondaryRealState.loading;
   const autoScaleRef = useRef(pane.autoScale);
   autoScaleRef.current = pane.autoScale;
-
-  const effectiveScaleMode =
-    pane.compareSymbols.length > 0 && pane.scaleMode !== 'indexed100'
-      ? 'percent'
-      : pane.scaleMode;
-  const dynamicPriceAxisWidth = computePriceAxisWidth(
-    effectivePrecision,
-    effectiveScaleMode,
-    chartSettings.canvas.scaleFontSize,
-  );
 
   // Reset & auto-fit viewport when symbol/timeframe changes, real candles hydrate, or Replay steps
   const prevSeriesMetaRef = useRef<{
@@ -801,12 +912,15 @@ export function ChartCanvas({
     };
 
     if (symTfChanged || sourceUpgraded || finishedLoading || seriesReplaced) {
-      const targetVisible = Math.max(
-        20,
-        Math.min(
-          Math.max(20, len),
-          getVisibleBarCountForRange(pane.rangePreset, len || 140),
-        ),
+      const plotW = Math.max(120, size.width - dynamicPriceAxisWidth);
+      const proportionalDefault = defaultVisibleBarsForWidth(plotW);
+      const rangeTarget =
+        pane.rangePreset === '1Y' || pane.rangePreset === '6M'
+          ? proportionalDefault
+          : getVisibleBarCountForRange(pane.rangePreset, len || 140);
+      const targetVisible = clampVisibleBars(
+        Math.min(Math.max(20, len || proportionalDefault), rangeTarget),
+        plotW,
       );
       const rightPad = Math.max(
         3,
@@ -910,11 +1024,30 @@ export function ChartCanvas({
   const ctrlHeldRef = useRef(false);
   const [eraserHoveredId, setEraserHoveredId] = useState<string | null>(null);
   const [zoomBox, setZoomBox] = useState<ZoomBoxOverlay | null>(null);
+  const [legendCollapsed, setLegendCollapsed] = useState<boolean>(false);
 
-  // Drawing interaction state
+  // Drawing interaction state (with synchronous ref updater so rapid mousemove/clicks never see stale null!)
   const [draftDrawing, setDraftDrawing] = useState<DrawingObject | null>(null);
   const draftDrawingRef = useRef<DrawingObject | null>(null);
   draftDrawingRef.current = draftDrawing;
+
+  const updateDraftDrawing = useCallback((next: DrawingObject | null) => {
+    draftDrawingRef.current = next;
+    setDraftDrawing(next);
+  }, []);
+
+  // Reactive toggle for Mobile long-press crosshair inspect ("Valori visualizzati al tocco prolungato")
+  const longPressValuesEnabledRef = useRef<boolean>(readLongPressValuesEnabled());
+  useEffect(() => {
+    const onToggle = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ enabled?: boolean }>).detail;
+      if (typeof detail?.enabled === 'boolean') {
+        longPressValuesEnabledRef.current = detail.enabled;
+      }
+    };
+    window.addEventListener('tv-long-press-values-change', onToggle);
+    return () => window.removeEventListener('tv-long-press-values-change', onToggle);
+  }, []);
 
   // Track touch interaction to deduplicate synthetic mouse events & show mobile hint pill
   const lastTouchMsRef = useRef<number>(0);
@@ -965,6 +1098,12 @@ export function ChartCanvas({
         startPt: DrawingPoint;
         origPoints: DrawingPoint[];
       }
+    | {
+        kind: 'placeDraft';
+        startX: number;
+        startY: number;
+        dragged: boolean;
+      }
   >(null);
 
   // Synced sibling hovered index (for Multi-Chart OHLC & indicator readouts)
@@ -1003,73 +1142,93 @@ export function ChartCanvas({
     : Math.max(symbol.tickSize, anchorClose - halfSpread);
   const askPrice = quoteMatchesCandles ? liveQuote.ask : anchorClose + halfSpread;
 
-  // Render canvas via requestAnimationFrame whenever visual state changes
-  useEffect(() => {
+  // Non-cancelling 60/120fps canvas render scheduler:
+  // NEVER cancels a pending rAF on rapid mousemove/wheel events (fixes high-polling mouse freeze!)
+  const rafIdRef = useRef<number>(0);
+  const renderParamsRef = useRef<Omit<Parameters<typeof renderChart>[0], 'ctx'> | null>(null);
+
+  const flushCanvasRender = useCallback(() => {
+    rafIdRef.current = 0;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const params = renderParamsRef.current;
+    if (!canvas || !params) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    const targetW = Math.round(size.width * dpr);
-    const targetH = Math.round(size.height * dpr);
+    const targetW = Math.round(params.width * dpr);
+    const targetH = Math.round(params.height * dpr);
     if (canvas.width !== targetW || canvas.height !== targetH) {
       canvas.width = targetW;
       canvas.height = targetH;
     }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    layoutRef.current = renderChart({ ctx, ...params });
+    ctx.restore();
+  }, []);
 
-    let frameId = 0;
-    frameId = window.requestAnimationFrame(() => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.save();
-      ctx.scale(dpr, dpr);
-      layoutRef.current = renderChart({
-        ctx,
-        width: size.width,
-        height: size.height,
-        theme,
-        symbol,
-        timeframe: pane.timeframe,
-        chartType: pane.chartType,
-        candles: displayCandles,
-        rawCandles,
-        viewport,
-        scaleMode: pane.scaleMode,
-        autoScale: pane.autoScale,
-        invertScale,
-        lockPriceToBarRatio,
-        priceScalePosition,
-        showVolume: pane.showVolume,
-        showGrid: pane.showGrid,
-        countdownText,
-        overlaySeries,
-        separateSeries,
-        compareSeries,
-        drawings: paneDrawings,
-        draftDrawing,
-        selectedDrawingId: isActivePane ? selectedDrawingId : null,
-        eraserHoveredId:
-          isActivePane && canonicalTool === 'eraser' ? eraserHoveredId : null,
-        hideDrawings,
-        hideMode,
-        positions: paperAccount.positions,
-        orders: paperAccount.orders,
-        executions: paperAccount.history,
-        alerts,
-        crosshair,
-        syncedCrosshairTime,
-        subPaneHeightRatio,
-        subPaneSplitterHovered:
-          hoverZone === 'subSplitter' || dragRef.current?.kind === 'subResize',
-        cursorMode,
-        bidPrice,
-        askPrice,
-        zoomBox,
-        chartSettings,
-      });
-      ctx.restore();
-    });
+  const scheduleCanvasRender = useCallback(() => {
+    if (rafIdRef.current !== 0) return;
+    rafIdRef.current = window.requestAnimationFrame(flushCanvasRender);
+  }, [flushCanvasRender]);
 
-    return () => window.cancelAnimationFrame(frameId);
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== 0) {
+        window.cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = 0;
+      }
+    };
+  }, []);
+
+  renderParamsRef.current = {
+    width: size.width,
+    height: size.height,
+    theme,
+    symbol,
+    timeframe: pane.timeframe,
+    chartType: pane.chartType,
+    candles: displayCandles,
+    rawCandles,
+    viewport,
+    scaleMode: pane.scaleMode,
+    autoScale: pane.autoScale,
+    invertScale,
+    lockPriceToBarRatio,
+    priceScalePosition,
+    showVolume: pane.showVolume,
+    showGrid: pane.showGrid,
+    countdownText,
+    overlaySeries,
+    separateSeries,
+    compareSeries,
+    drawings: paneDrawings,
+    draftDrawing,
+    selectedDrawingId: isActivePane ? selectedDrawingId : null,
+    eraserHoveredId:
+      isActivePane && canonicalTool === 'eraser' ? eraserHoveredId : null,
+    hideDrawings,
+    hideMode,
+    positions: [],
+    orders: [],
+    executions: [],
+    alerts,
+    crosshair,
+    syncedCrosshairTime,
+    subPaneHeightRatio,
+    subPaneSplitterHovered:
+      hoverZone === 'subSplitter' || dragRef.current?.kind === 'subResize',
+    cursorMode,
+    bidPrice,
+    askPrice,
+    zoomBox,
+    chartSettings,
+  };
+
+  useEffect(() => {
+    scheduleCanvasRender();
   }, [
+    scheduleCanvasRender,
     size,
     theme,
     symbol,
@@ -1097,9 +1256,6 @@ export function ChartCanvas({
     isActivePane,
     hideDrawings,
     hideMode,
-    paperAccount.positions,
-    paperAccount.orders,
-    paperAccount.history,
     alerts,
     crosshair,
     syncedCrosshairTime,
@@ -1138,6 +1294,38 @@ export function ChartCanvas({
         return;
       }
 
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey) {
+        const k = ev.key.toLowerCase();
+        if (k === 'c' && selectedDrawingId) {
+          const selected = paneDrawings.find((d) => d.id === selectedDrawingId);
+          if (selected) {
+            ev.preventDefault();
+            setCopiedDrawing(selected);
+            return;
+          }
+        }
+        if (k === 'v') {
+          const copied = getCopiedDrawing();
+          if (copied && !lockDrawings) {
+            ev.preventDefault();
+            const layout = layoutRef.current;
+            const tfSec = TIMEFRAME_SECONDS[pane.timeframe] || 86400;
+            const span = layout ? Math.abs(layout.mainMax - layout.mainMin) : 0;
+            const priceOffset = span > 0 ? span * 0.03 : 0;
+            const pasted = createPastedDrawing(
+              copied,
+              symbol.ticker,
+              pane.timeframe,
+              priceOffset,
+              tfSec * 3,
+            );
+            addDrawing(pasted);
+            setSelectedDrawingId(pasted.id);
+            return;
+          }
+        }
+      }
+
       if (ev.key === 'Enter' && draftDrawing) {
         const draftCanon = normalizeDrawingTool(draftDrawing.type);
         if (draftCanon === 'path' && draftDrawing.points.length >= 2) {
@@ -1152,22 +1340,78 @@ export function ChartCanvas({
         }
       }
 
+      // Arrow keys nudge selected drawing by 1 bar / 1 step (1:1 TradingView!)
+      if (
+        !ev.ctrlKey &&
+        !ev.metaKey &&
+        !ev.altKey &&
+        selectedDrawingId &&
+        !lockDrawings &&
+        (ev.key === 'ArrowLeft' ||
+          ev.key === 'ArrowRight' ||
+          ev.key === 'ArrowUp' ||
+          ev.key === 'ArrowDown')
+      ) {
+        const selected = paneDrawings.find((d) => d.id === selectedDrawingId);
+        if (selected && !selected.locked) {
+          ev.preventDefault();
+          const tfSec = TIMEFRAME_SECONDS[pane.timeframe] || 86400;
+          const layout = layoutRef.current;
+          const visSpan = layout
+            ? Math.abs(
+                yToPrice(layout.mainRect.top, layout) -
+                  yToPrice(layout.mainRect.bottom, layout),
+              )
+            : 0;
+          const priceStep =
+            visSpan > 0
+              ? Math.max(symbol.tickSize, visSpan * 0.005)
+              : symbol.tickSize;
+          const dt =
+            ev.key === 'ArrowRight' ? tfSec : ev.key === 'ArrowLeft' ? -tfSec : 0;
+          const dp =
+            ev.key === 'ArrowUp'
+              ? priceStep
+              : ev.key === 'ArrowDown'
+                ? -priceStep
+                : 0;
+          updateDrawing(symbol.ticker, selected.id, {
+            points: selected.points.map((p) => ({
+              time: p.time + dt,
+              price: p.price + dp,
+            })),
+            ...(selected.targetPrice !== undefined
+              ? { targetPrice: selected.targetPrice + dp }
+              : {}),
+            ...(selected.stopPrice !== undefined
+              ? { stopPrice: selected.stopPrice + dp }
+              : {}),
+          });
+          return;
+        }
+      }
+
       if (ev.key === 'Escape') {
-        if (draftDrawing) {
-          setDraftDrawing(null);
+        if (draftDrawingRef.current) {
+          ev.preventDefault();
+          updateDraftDrawing(null);
           return;
         }
         if (textInputState) {
+          ev.preventDefault();
           setTextInputState(null);
           return;
         }
         if (zoomBox) {
+          ev.preventDefault();
           setZoomBox(null);
           return;
         }
         if (canonicalTool !== 'crosshair') {
+          ev.preventDefault();
           setActiveTool('crosshair');
         } else if (selectedDrawingId) {
+          ev.preventDefault();
           setSelectedDrawingId(null);
         }
       } else if (
@@ -1218,8 +1462,12 @@ export function ChartCanvas({
     lockDrawings,
     deleteDrawing,
     addDrawing,
+    updateDrawing,
+    updateDraftDrawing,
     stayInDrawingMode,
     symbol.ticker,
+    symbol.tickSize,
+    pane.timeframe,
     resetChartView,
   ]);
 
@@ -1311,6 +1559,10 @@ export function ChartCanvas({
       }
 
       if (isPointInMainPriceAxis(localX, localY, layout)) {
+        const topPrice = yToPrice(layout.mainRect.top, layout);
+        const botPrice = yToPrice(layout.mainRect.bottom, layout);
+        const barCount = Math.max(1, viewportRef.current.visibleBars);
+        const priceToBarRatio = Math.abs(topPrice - botPrice) / barCount;
         onChartContextMenu({
           target: 'price_axis',
           clientX,
@@ -1319,6 +1571,7 @@ export function ChartCanvas({
           barIndex,
           timestamp,
           paneIndex,
+          priceToBarRatio,
         });
         return;
       }
@@ -1378,13 +1631,13 @@ export function ChartCanvas({
   const commitCompletedDrawing = useCallback(
     (drawing: DrawingObject) => {
       const finalized = finalizePositionDrawing(drawing);
-      setDraftDrawing(null);
+      updateDraftDrawing(null);
       addDrawing(finalized);
       if (!stayInDrawingMode) {
         setActiveTool('crosshair');
       }
     },
-    [addDrawing, stayInDrawingMode, setActiveTool],
+    [addDrawing, stayInDrawingMode, setActiveTool, updateDraftDrawing],
   );
 
   // Helper: place drawing point for ALL 64 tools (mouse clicks & touch taps)
@@ -1394,6 +1647,7 @@ export function ChartCanvas({
       y: number,
       overrideTool?: CanonicalDrawingToolType,
       forceWeakMagnet = false,
+      shiftKey = false,
     ): boolean => {
       const layout = layoutRef.current;
       if (!layout || rawCandles.length === 0 || !isPointInMainPlot(x, y, layout)) {
@@ -1416,7 +1670,24 @@ export function ChartCanvas({
         return false;
       }
 
-      const pt = screenToDrawingPoint(x, y, forceWeakMagnet);
+      const currentDraft = draftDrawingRef.current;
+      let targetX = x;
+      let targetY = y;
+      if (shiftKey && currentDraft && currentDraft.points.length >= 2) {
+        const anchorPt = currentDraft.points[currentDraft.points.length - 2];
+        const constrained = constrainScreenWithShift(
+          anchorPt,
+          x,
+          y,
+          normalizeDrawingTool(currentDraft.type),
+          layout,
+          rawCandles,
+        );
+        targetX = constrained.x;
+        targetY = constrained.y;
+      }
+
+      const pt = screenToDrawingPoint(targetX, targetY, forceWeakMagnet);
       if (!pt) return false;
       const meta = DRAWING_TOOL_REGISTRY[tool];
       const toolType = tool as PersistableDrawingType;
@@ -1434,8 +1705,38 @@ export function ChartCanvas({
           visible: true,
           createdAt: Date.now(),
         };
-        setDraftDrawing(draft);
+        updateDraftDrawing(draft);
         dragRef.current = { kind: 'freehand', drawing: draft };
+        return true;
+      }
+
+      // 1b) 1-Click Posizione long / Posizione short (1:1 TradingView!)
+      if (tool === 'long_position' || tool === 'short_position') {
+        const topP = yToPrice(layout.mainRect.top, layout);
+        const botP = yToPrice(layout.mainRect.bottom, layout);
+        const visSpan = Math.abs(topP - botP) || Math.max(pt.price * 0.04, symbol.tickSize * 10);
+        const targetDelta = Math.max(symbol.tickSize * 2, visSpan * 0.16);
+        const stopDelta = targetDelta * 0.5;
+        const bar0 = Math.round(xToIndex(targetX, layout));
+        const barSpan = Math.max(8, Math.round(viewportRef.current.visibleBars * 0.14));
+        const endTime = indexToTime(bar0 + barSpan, rawCandles);
+        const isLong = tool === 'long_position';
+        const targetPrice = isLong ? pt.price + targetDelta : pt.price - targetDelta;
+        const stopPrice = isLong ? pt.price - stopDelta : pt.price + stopDelta;
+
+        commitCompletedDrawing({
+          id: makeDrawingId(),
+          symbol: symbol.ticker,
+          timeframe: pane.timeframe,
+          type: toolType,
+          points: [pt, { time: endTime, price: targetPrice }],
+          targetPrice,
+          stopPrice,
+          style: buildDrawingStyle(tool),
+          locked: false,
+          visible: true,
+          createdAt: Date.now(),
+        });
         return true;
       }
 
@@ -1443,7 +1744,7 @@ export function ChartCanvas({
       if (meta.pointCount === 1) {
         if (TEXT_PROMPT_TOOLS.has(tool)) {
           setTextInputState({
-            screen: { x, y },
+            screen: { x: targetX, y: targetY },
             points: [pt],
             toolType,
             value: '',
@@ -1465,10 +1766,9 @@ export function ChartCanvas({
       }
 
       // 3) Multi-point open polyline ('path' — click adds points, double-click or Enter finishes)
-      const currentDraft = draftDrawingRef.current;
       if (meta.pointCount === 'multi') {
         if (!currentDraft) {
-          setDraftDrawing({
+          updateDraftDrawing({
             id: makeDrawingId(),
             symbol: symbol.ticker,
             timeframe: pane.timeframe,
@@ -1480,7 +1780,7 @@ export function ChartCanvas({
             createdAt: Date.now(),
           });
         } else {
-          setDraftDrawing({
+          updateDraftDrawing({
             ...currentDraft,
             points: currentDraft.points.slice(0, -1).concat(pt, pt),
           });
@@ -1491,7 +1791,7 @@ export function ChartCanvas({
       // 4) Fixed N-point tools (2, 3, 4, 5, 6 points)
       const requiredPoints = meta.pointCount;
       if (!currentDraft) {
-        setDraftDrawing({
+        updateDraftDrawing({
           id: makeDrawingId(),
           symbol: symbol.ticker,
           timeframe: pane.timeframe,
@@ -1507,7 +1807,7 @@ export function ChartCanvas({
 
       const committedSoFar = currentDraft.points.slice(0, -1).concat(pt);
       if (committedSoFar.length < requiredPoints) {
-        setDraftDrawing({
+        updateDraftDrawing({
           ...currentDraft,
           points: committedSoFar.concat(pt),
         });
@@ -1516,9 +1816,9 @@ export function ChartCanvas({
 
       // All required points placed!
       if (TEXT_PROMPT_TOOLS.has(tool)) {
-        setDraftDrawing(null);
+        updateDraftDrawing(null);
         setTextInputState({
-          screen: { x, y },
+          screen: { x: targetX, y: targetY },
           points: committedSoFar,
           toolType,
           value: '',
@@ -1534,14 +1834,16 @@ export function ChartCanvas({
     },
     [
       canonicalTool,
-      rawCandles.length,
+      rawCandles,
       lockDrawings,
       findHitDrawing,
       deleteDrawing,
       symbol.ticker,
+      symbol.tickSize,
       screenToDrawingPoint,
       pane.timeframe,
       commitCompletedDrawing,
+      updateDraftDrawing,
     ],
   );
 
@@ -1677,6 +1979,12 @@ export function ChartCanvas({
         startedWithDraft: boolean;
         point1Anchored: boolean;
       }
+    | {
+        kind: 'dragHandle';
+        drawingId: string;
+        handleIndex: number;
+        origPoints: DrawingPoint[];
+      }
   >(null);
 
   // Keep latest reactive data/callbacks in a ref so touch listeners & press-and-hold timers
@@ -1700,6 +2008,8 @@ export function ChartCanvas({
     applyZoomBox,
     findHitDrawing,
     setSelectedDrawingId,
+    selectedDrawingId,
+    updateDrawing,
     emitContextMenuAt,
     onPriceAxisPlusClick,
   });
@@ -1722,6 +2032,8 @@ export function ChartCanvas({
     applyZoomBox,
     findHitDrawing,
     setSelectedDrawingId,
+    selectedDrawingId,
+    updateDrawing,
     emitContextMenuAt,
     onPriceAxisPlusClick,
   };
@@ -1840,6 +2152,30 @@ export function ChartCanvas({
         return;
       }
 
+      // 3b) Touch-drag a control handle of the currently selected drawing on Mobile!
+      if (
+        inMainPlot &&
+        !env.lockDrawings &&
+        isCursorOrUtilityTool(env.activeTool) &&
+        env.canonicalTool !== 'eraser' &&
+        env.selectedDrawingId
+      ) {
+        const hit = env.findHitDrawing(p.x, p.y, layout, 18, false);
+        if (
+          hit &&
+          hit.drawing.id === env.selectedDrawingId &&
+          hit.handleIndex !== null
+        ) {
+          touchRef.current = {
+            kind: 'dragHandle',
+            drawingId: hit.drawing.id,
+            handleIndex: hit.handleIndex,
+            origPoints: hit.drawing.points.map((pt) => ({ ...pt })),
+          };
+          return;
+        }
+      }
+
       // 4) ALL other tools (cursors + ALL click-placed drawing tools):
       //    1-finger drag (> 10px) PANS THE CHART SMOOTHLY; stationary tap (<= 10px) places anchor / selects!
       const zone: 'priceAxis' | 'timeAxis' | 'plot' = isPointInMainPriceAxis(
@@ -1872,8 +2208,13 @@ export function ChartCanvas({
       const isPlacementTool =
         !isCursorOrUtilityTool(env.activeTool) && !env.lockDrawings;
 
-      // Press-and-hold (260ms) enters TradingView Mobile Crosshair Inspect Mode (cursor mode on plot)
-      if (zone === 'plot' && !isPlacementTool && env.canonicalTool !== 'eraser') {
+      // Press-and-hold (260ms) enters TradingView Mobile Crosshair Inspect Mode (respects `Valori visualizzati al tocco prolungato`!)
+      if (
+        zone === 'plot' &&
+        !isPlacementTool &&
+        env.canonicalTool !== 'eraser' &&
+        longPressValuesEnabledRef.current
+      ) {
         inspectTimerRef.current = window.setTimeout(() => {
           const curEnv = touchEnvRef.current;
           const st = touchRef.current;
@@ -2020,6 +2361,17 @@ export function ChartCanvas({
         return;
       }
 
+      if (state.kind === 'dragHandle') {
+        const pt = env.screenToDrawingPoint(p.x, p.y);
+        if (pt) {
+          const nextPts = state.origPoints.map((orig, idx) =>
+            idx === state.handleIndex ? pt : orig,
+          );
+          env.updateDrawing(env.symbolTicker, state.drawingId, { points: nextPts });
+        }
+        return;
+      }
+
       if (state.kind === 'freehand') {
         const pt = env.screenToDrawingPoint(p.x, p.y);
         if (pt) {
@@ -2113,11 +2465,14 @@ export function ChartCanvas({
             manualMax: mid + nextSpan / 2,
           }));
         } else if (state.zone === 'timeAxis') {
-          const nextBars = Math.max(
-            MIN_VISIBLE_BARS,
-            Math.min(MAX_VISIBLE_BARS, state.startVp.visibleBars * Math.exp(-dx * 0.005)),
+          setViewport(
+            applyTimeAxisDragZoom({
+              startViewport: state.startVp,
+              dx,
+              plotWidth: layout.plotWidth,
+              candleCount: env.rawCandles.length,
+            }),
           );
-          setViewport((vp) => ({ ...vp, visibleBars: nextBars }));
         } else {
           const deltaBars = dx / Math.max(1, layout.barStepPx);
           const nextRight = Math.max(
@@ -2156,6 +2511,10 @@ export function ChartCanvas({
       if (state.kind === 'zoomBox') {
         setZoomBox(null);
         env.applyZoomBox({ x1: state.x1, y1: state.y1, x2: state.x2, y2: state.y2 });
+        return;
+      }
+
+      if (state.kind === 'dragHandle') {
         return;
       }
 
@@ -2213,10 +2572,11 @@ export function ChartCanvas({
           return;
         }
         if (isDoubleTap && state.zone === 'timeAxis') {
+          const resetBars = defaultVisibleBarsForWidth(layout.plotWidth);
           setViewport((vp) => ({
             ...vp,
-            visibleBars: 120,
-            rightIndex: Math.max(120, env.rawCandles.length + env.rightMarginBars),
+            visibleBars: resetBars,
+            rightIndex: Math.max(resetBars * 0.5, env.rawCandles.length + env.rightMarginBars),
           }));
           return;
         }
@@ -2329,7 +2689,18 @@ export function ChartCanvas({
         return;
       }
 
-      // 2) Two-finger horizontal trackpad swipe -> smooth horizontal pan!
+      // 2) Shift + Wheel OR Two-finger horizontal trackpad swipe -> smooth horizontal scroll (NO zoom!)
+      if (ev.shiftKey && Math.abs(ev.deltaY) > 0) {
+        setViewport((vp) =>
+          applyShiftWheelPan({
+            viewport: vp,
+            deltaY: ev.deltaY,
+            candleCount: rawCandles.length,
+          }),
+        );
+        return;
+      }
+
       if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY) && Math.abs(ev.deltaX) > 2) {
         const deltaBars = ev.deltaX / Math.max(1, layout.barStepPx);
         setViewport((vp) => ({
@@ -2345,44 +2716,26 @@ export function ChartCanvas({
         return;
       }
 
-      // 3) Smooth proportional exponential zoom (works silky-smooth on both wheel clicks & trackpads)
-      const clampedDy = Math.max(-120, Math.min(120, ev.deltaY));
-      const factor = Math.exp(clampedDy * 0.0018);
-
-      // Over Time Axis -> anchored to right edge
-      if (isPointInTimeAxis(x, y, layout)) {
-        setViewport((vp) => ({
-          ...vp,
-          visibleBars: Math.max(
-            MIN_VISIBLE_BARS,
-            Math.min(MAX_VISIBLE_BARS, vp.visibleBars * factor),
-          ),
-        }));
-        return;
-      }
-
-      // Over Main Plot / Sub-Panes -> anchored cleanly to cursor X
+      // 3) 1:1 TradingView Wheel Zoom:
+      //    - Over Time Axis OR plain Wheel over plot -> anchors RIGHT EDGE (latest bar stays pinned!)
+      //    - Ctrl / Meta + Wheel over plot -> anchors EXACT BAR UNDER CURSOR X!
+      const anchorCursor =
+        !isPointInTimeAxis(x, y, layout) && (ev.ctrlKey || ev.metaKey);
       const anchorRatio = Math.max(
         0,
         Math.min(1, (x - layout.plotLeft) / Math.max(1, layout.plotWidth)),
       );
 
-      setViewport((vp) => {
-        const nextBars = Math.max(
-          MIN_VISIBLE_BARS,
-          Math.min(MAX_VISIBLE_BARS, vp.visibleBars * factor),
-        );
-        const anchorIndex = vp.rightIndex - vp.visibleBars * (1 - anchorRatio);
-        const nextRight = anchorIndex + nextBars * (1 - anchorRatio);
-        return {
-          ...vp,
-          visibleBars: nextBars,
-          rightIndex: Math.max(
-            6,
-            Math.min(maxRightBound(rawCandles.length, nextBars), nextRight),
-          ),
-        };
-      });
+      setViewport((vp) =>
+        applyWheelZoom({
+          viewport: vp,
+          deltaY: ev.deltaY,
+          plotWidth: layout.plotWidth,
+          candleCount: rawCandles.length,
+          anchorCursor,
+          anchorRatio,
+        }),
+      );
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -2509,16 +2862,52 @@ export function ChartCanvas({
     }
 
     // 5) Drawing placement (or Eraser deletion) when a drawing tool is active
-    if (placeDrawingPointAt(x, y, undefined, ev.ctrlKey)) {
+    const hadDraftBefore = draftDrawingRef.current !== null;
+    if (placeDrawingPointAt(x, y, undefined, ev.ctrlKey, ev.shiftKey)) {
+      // Support BOTH Click-Move-Click AND Press-Drag-Release for 2-point tools!
+      const nowDraft = draftDrawingRef.current;
+      if (
+        !hadDraftBefore &&
+        nowDraft &&
+        DRAWING_TOOL_REGISTRY[normalizeDrawingTool(nowDraft.type)].pointCount === 2
+      ) {
+        dragRef.current = {
+          kind: 'placeDraft',
+          startX: x,
+          startY: y,
+          dragged: false,
+        };
+      }
       return;
     }
 
-    // 6) Hit-test existing drawings for selection & dragging
+    // 6) Hit-test existing drawings for selection, dragging & Ctrl+Drag duplication
     if (inMainPlot && !lockDrawings) {
       const hit = findHitDrawing(x, y, layout, 8, false);
       if (hit) {
+        const startPt = screenToDrawingPoint(x, y, false);
+        if ((ev.ctrlKey || ev.metaKey) && hit.handleIndex === null && startPt) {
+          const cloned: DrawingObject = {
+            ...hit.drawing,
+            id: makeDrawingId(),
+            locked: false,
+            visible: true,
+            createdAt: Date.now(),
+            points: hit.drawing.points.map((p) => ({ ...p })),
+            style: { ...hit.drawing.style },
+          };
+          addDrawing(cloned);
+          setSelectedDrawingId(cloned.id);
+          dragRef.current = {
+            kind: 'dragDrawing',
+            drawingId: cloned.id,
+            handleIndex: null,
+            startPt,
+            origPoints: cloned.points.map((p) => ({ ...p })),
+          };
+          return;
+        }
         setSelectedDrawingId(hit.drawing.id);
-        const startPt = screenToDrawingPoint(x, y, ev.ctrlKey);
         if (startPt) {
           dragRef.current = {
             kind: 'dragDrawing',
@@ -2601,15 +2990,38 @@ export function ChartCanvas({
       }
     }
 
-    // Update ghost draft drawing preview
-    if (draftDrawing && (!dragRef.current || dragRef.current.kind !== 'freehand')) {
-      const pt = screenToDrawingPoint(x, y, ev.ctrlKey);
+    // Update live rubber-band draft drawing preview (reads synchronous ref so zero frames are missed!)
+    const activeDraft = draftDrawingRef.current;
+    if (activeDraft && (!dragRef.current || dragRef.current.kind !== 'freehand')) {
+      if (
+        dragRef.current &&
+        dragRef.current.kind === 'placeDraft' &&
+        !dragRef.current.dragged &&
+        Math.hypot(x - dragRef.current.startX, y - dragRef.current.startY) > 12
+      ) {
+        dragRef.current.dragged = true;
+      }
+
+      let previewX = x;
+      let previewY = y;
+      if (ev.shiftKey && activeDraft.points.length >= 2) {
+        const anchorPt = activeDraft.points[activeDraft.points.length - 2];
+        const constrained = constrainScreenWithShift(
+          anchorPt,
+          x,
+          y,
+          normalizeDrawingTool(activeDraft.type),
+          layout,
+          rawCandles,
+        );
+        previewX = constrained.x;
+        previewY = constrained.y;
+      }
+
+      const pt = screenToDrawingPoint(previewX, previewY, ev.ctrlKey);
       if (pt) {
-        setDraftDrawing((prev) => {
-          if (!prev) return null;
-          const nextPts = prev.points.slice(0, -1).concat(pt);
-          return { ...prev, points: nextPts };
-        });
+        const nextPts = activeDraft.points.slice(0, -1).concat(pt);
+        updateDraftDrawing({ ...activeDraft, points: nextPts });
       }
     }
 
@@ -2651,25 +3063,25 @@ export function ChartCanvas({
       }
     } else if (drag.kind === 'priceZoom') {
       const dy = y - drag.startY;
-      const baseSpan = Math.max(1e-12, drag.startMax - drag.startMin);
-      const nextSpan = Math.max(
-        drag.rawSpan / 20,
-        Math.min(drag.rawSpan * 20, baseSpan * Math.exp(dy * 0.006)),
+      setViewport((vp) =>
+        applyPriceAxisDragZoom({
+          viewport: vp,
+          dy,
+          startMin: drag.startMin,
+          startMax: drag.startMax,
+          rawSpan: drag.rawSpan,
+        }),
       );
-      const mid = (drag.startMin + drag.startMax) / 2;
-      setViewport((vp) => ({
-        ...vp,
-        yZoom: Math.max(0.15, Math.min(12, drag.rawSpan / nextSpan)),
-        manualMin: mid - nextSpan / 2,
-        manualMax: mid + nextSpan / 2,
-      }));
     } else if (drag.kind === 'timeZoom') {
       const dx = x - drag.startX;
-      const nextBars = Math.max(
-        MIN_VISIBLE_BARS,
-        Math.min(MAX_VISIBLE_BARS, drag.startVp.visibleBars * Math.exp(-dx * 0.005)),
+      setViewport(
+        applyTimeAxisDragZoom({
+          startViewport: drag.startVp,
+          dx,
+          plotWidth: layout.plotWidth,
+          candleCount: rawCandles.length,
+        }),
       );
-      setViewport((vp) => ({ ...vp, visibleBars: nextBars }));
     } else if (drag.kind === 'zoomBox') {
       drag.x2 = Math.max(layout.plotLeft, Math.min(layout.plotRight, x));
       drag.y2 = Math.max(layout.mainRect.top, Math.min(layout.mainRect.bottom, y));
@@ -2684,7 +3096,33 @@ export function ChartCanvas({
         setDraftDrawing(drag.drawing);
       }
     } else if (drag.kind === 'dragDrawing') {
-      const curPt = screenToDrawingPoint(x, y, ev.ctrlKey);
+      let targetX = x;
+      let targetY = y;
+      if (drag.handleIndex === null && ev.shiftKey) {
+        const sx = indexToX(timeToIndex(drag.startPt.time, rawCandles), layout);
+        const sy = priceToY(drag.startPt.price, layout);
+        if (Math.abs(x - sx) >= Math.abs(y - sy)) {
+          targetY = sy;
+        } else {
+          targetX = sx;
+        }
+      } else if (drag.handleIndex !== null && ev.shiftKey && drag.origPoints.length >= 2) {
+        const otherIdx = drag.handleIndex === 0 ? 1 : 0;
+        const draggingObj = paneDrawings.find((d) => d.id === drag.drawingId);
+        if (draggingObj) {
+          const constrained = constrainScreenWithShift(
+            drag.origPoints[otherIdx],
+            x,
+            y,
+            normalizeDrawingTool(draggingObj.type),
+            layout,
+            rawCandles,
+          );
+          targetX = constrained.x;
+          targetY = constrained.y;
+        }
+      }
+      const curPt = screenToDrawingPoint(targetX, targetY, ev.ctrlKey);
       if (!curPt) return;
       if (drag.handleIndex !== null) {
         const nextPts = drag.origPoints.map((p, idx) =>
@@ -2703,17 +3141,32 @@ export function ChartCanvas({
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (ev: ReactMouseEvent<HTMLCanvasElement>) => {
     if (isSyntheticMouseAfterTouch()) return;
     const drag = dragRef.current;
     dragRef.current = null;
     setIsDraggingPan(false);
 
+    if (drag && drag.kind === 'placeDraft' && drag.dragged && draftDrawingRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        placeDrawingPointAt(
+          ev.clientX - rect.left,
+          ev.clientY - rect.top,
+          undefined,
+          ev.ctrlKey,
+          ev.shiftKey,
+        );
+      }
+      return;
+    }
+
     if (drag && drag.kind === 'freehand') {
       if (drag.drawing.points.length >= 2) {
         commitCompletedDrawing(drag.drawing);
       } else {
-        setDraftDrawing(null);
+        updateDraftDrawing(null);
       }
     } else if (drag && drag.kind === 'zoomBox') {
       setZoomBox(null);
@@ -2764,12 +3217,13 @@ export function ChartCanvas({
       return;
     }
 
-    // 2) Double-click on Time Axis -> resets default visibleBars & rightIndex
+    // 2) Double-click on Time Axis -> resets proportional barSpacing & rightIndex
     if (isPointInTimeAxis(x, y, layout)) {
+      const resetBars = defaultVisibleBarsForWidth(layout.plotWidth);
       setViewport((vp) => ({
         ...vp,
-        visibleBars: 120,
-        rightIndex: Math.max(120, rawCandles.length + rightMarginBars),
+        visibleBars: resetBars,
+        rightIndex: Math.max(resetBars * 0.5, rawCandles.length + rightMarginBars),
       }));
       return;
     }
@@ -2850,23 +3304,6 @@ export function ChartCanvas({
     setTextInputState(null);
   };
 
-  // Quick Buy/Sell handler
-  const handleQuickOrder = (side: 'buy' | 'sell') => {
-    const price = anchorClose;
-    placeOrder(
-      {
-        symbol: symbol.ticker,
-        side,
-        type: 'market',
-        quantity: 1,
-      },
-      price,
-    );
-    if (!chartSettings.trading.instantOrderPlacement) {
-      setBottomPanel('trading');
-    }
-  };
-
   // Legend OHLCV metrics (safe when rawCandles is [] while real data hydrates)
   const prevBar =
     legendRefIdx !== null && legendRefIdx > 0
@@ -2880,7 +3317,6 @@ export function ChartCanvas({
       ? (barDelta / (prevBar?.close ?? legendBar.open)) * 100
       : 0;
   const barIsUp = legendBar ? legendBar.close >= legendBar.open : true;
-  const spreadVal = Math.max(0, askPrice - bidPrice);
 
   const selectedDrawing = useMemo(
     () =>
@@ -2959,12 +3395,8 @@ export function ChartCanvas({
     !replay.active &&
     viewport.rightIndex < rawCandles.length - 8;
 
-  // Live Status Line settings
+  // Trade buttons disabled (trading module excluded by user scope)
   const statusCfg = chartSettings.statusLine;
-  const showBuySellButtons =
-    pane.showBuySellButtons &&
-    statusCfg.showBuySellButtons &&
-    chartSettings.trading.showBuySellButtons;
   const legendBgStyle =
     statusCfg.bgOpacity > 0
       ? {
@@ -3040,6 +3472,23 @@ export function ChartCanvas({
         ref={canvasRef}
         className="sc-canvas"
         style={{ cursor: cursorStyle }}
+        data-symbol={symbol.ticker}
+        data-visible-bars={viewport.visibleBars.toFixed(2)}
+        data-right-index={viewport.rightIndex.toFixed(2)}
+        data-bar-spacing={(
+          Math.max(1, size.width - dynamicPriceAxisWidth) /
+          Math.max(8, viewport.visibleBars)
+        ).toFixed(2)}
+        data-auto-scale={String(pane.autoScale)}
+        data-scale-mode={pane.scaleMode}
+        data-invert-scale={String(invertScale)}
+        data-price-scale-pos={priceScalePosition}
+        data-active-tool={canonicalTool}
+        data-draft-points={draftDrawing ? String(draftDrawing.points.length) : '0'}
+        data-drawings-count={String(paneDrawings.length)}
+        data-selected-drawing={selectedDrawingId ?? ''}
+        data-crosshair-visible={String(crosshair.visible)}
+        data-crosshair-bar={String(crosshair.barIndex)}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -3105,37 +3554,41 @@ export function ChartCanvas({
           )}
 
           {legendBar && (statusCfg.showOhlc || statusCfg.showBarChange) && (
-            <div className="sc-ohlc-row">
+            <div className="sc-ohlc-row" data-testid="ohlc-legend">
               {statusCfg.showOhlc && (
                 <>
-                  <span className="sc-ohlc-item sc-ohlc-verbose">
-                    <span className="sc-ohlc-lbl">Aper.</span>
+                  <span className="sc-ohlc-item sc-ohlc-verbose" title="Apertura">
+                    <span className="sc-ohlc-lbl">O</span>
                     <span
                       className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}
+                      data-testid="ohlc-open"
                     >
                       {formatPrice(legendBar.open, effectivePrecision)}
                     </span>
                   </span>
-                  <span className="sc-ohlc-item sc-ohlc-verbose">
-                    <span className="sc-ohlc-lbl">Max.</span>
+                  <span className="sc-ohlc-item sc-ohlc-verbose" title="Massimo">
+                    <span className="sc-ohlc-lbl">H</span>
                     <span
                       className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}
+                      data-testid="ohlc-high"
                     >
                       {formatPrice(legendBar.high, effectivePrecision)}
                     </span>
                   </span>
-                  <span className="sc-ohlc-item sc-ohlc-verbose">
-                    <span className="sc-ohlc-lbl">Min.</span>
+                  <span className="sc-ohlc-item sc-ohlc-verbose" title="Minimo">
+                    <span className="sc-ohlc-lbl">L</span>
                     <span
                       className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}
+                      data-testid="ohlc-low"
                     >
                       {formatPrice(legendBar.low, effectivePrecision)}
                     </span>
                   </span>
-                  <span className="sc-ohlc-item">
-                    <span className="sc-ohlc-lbl sc-ohlc-verbose">Chius.</span>
+                  <span className="sc-ohlc-item" title="Chiusura">
+                    <span className="sc-ohlc-lbl">C</span>
                     <span
                       className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}
+                      data-testid="ohlc-close"
                     >
                       {formatPrice(legendBar.close, effectivePrecision)}
                     </span>
@@ -3155,175 +3608,188 @@ export function ChartCanvas({
           )}
         </div>
 
-        {/* Buy / Sell Quick Buttons (VENDI / spread / ACQUISTA) */}
-        {showBuySellButtons && (
-          <div className="sc-buysell-row">
-            <button
-              type="button"
-              className="sc-order-btn sc-order-btn--sell"
-              title={`Vendi 1 ${symbol.ticker} a mercato (Paper Trading)`}
-              onClick={() => handleQuickOrder('sell')}
-            >
-              <span className="sc-order-price">
-                {formatPrice(bidPrice, effectivePrecision)}
-              </span>
-              <span className="sc-order-tag">VENDI</span>
-            </button>
-            <span className="sc-spread-label" title="Spread bid/ask">
-              {formatPrice(spreadVal, effectivePrecision)}
-            </span>
-            <button
-              type="button"
-              className="sc-order-btn sc-order-btn--buy"
-              title={`Acquista 1 ${symbol.ticker} a mercato (Paper Trading)`}
-              onClick={() => handleQuickOrder('buy')}
-            >
-              <span className="sc-order-price">
-                {formatPrice(askPrice, effectivePrecision)}
-              </span>
-              <span className="sc-order-tag">ACQUISTA</span>
-            </button>
-          </div>
-        )}
+        {/* Volume + Active Indicators + Comparison Symbols Rows + TradingView [ ^ ] Collapse Toggler */}
+        {(() => {
+          const visibleIndicators =
+            hideMode !== 'indicators' && hideMode !== 'all'
+              ? pane.indicators.filter(
+                  (ind) =>
+                    !ind.visibleTimeframes ||
+                    ind.visibleTimeframes.length === 0 ||
+                    ind.visibleTimeframes.includes(pane.timeframe),
+                )
+              : [];
+          const hasVolRow = Boolean(pane.showVolume && statusCfg.showVolume && legendBar);
+          const totalLegendRows =
+            (hasVolRow ? 1 : 0) + visibleIndicators.length + compareSeries.length;
+          if (totalLegendRows === 0) return null;
 
-        {/* Volume + Active Indicators + Comparison Symbols Rows */}
-        <div className="sc-ind-list">
-          {pane.showVolume && statusCfg.showVolume && legendBar && (
-            <div className="sc-ind-row">
-              <span>Vol</span>
-              <span className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}>
-                {formatVolume(legendBar.volume)}
-              </span>
-            </div>
-          )}
+          return (
+            <div className="sc-ind-section">
+              {!legendCollapsed && (
+                <div className="sc-ind-list" data-testid="legend-indicators-list">
+                  {hasVolRow && legendBar && (
+                    <div className="sc-ind-row" data-testid="legend-vol-row">
+                      <span>Vol</span>
+                      <span
+                        className={barIsUp ? 'sc-ohlc-val--up' : 'sc-ohlc-val--down'}
+                        data-testid="legend-vol-value"
+                      >
+                        {formatVolume(legendBar.volume)}
+                      </span>
+                    </div>
+                  )}
 
-          {hideMode !== 'indicators' &&
-            hideMode !== 'all' &&
-            pane.indicators.map((ind) => {
-              if (
-                ind.visibleTimeframes &&
-                ind.visibleTimeframes.length > 0 &&
-                !ind.visibleTimeframes.includes(pane.timeframe)
-              ) {
-                return null;
-              }
-              const series = paneIndicatorSeries.find(
-                (s) => s.configId === ind.id,
-              );
-              const refIdx = legendRefIdx ?? Math.max(0, rawCandles.length - 1);
-              const rawTitle = series?.title ?? ind.name;
-              const displayTitle = statusCfg.showIndicatorArguments
-                ? rawTitle
-                : rawTitle
-                    .replace(/\s*\([^)]*\)/g, '')
-                    .replace(/\s+\d[\d,\s.]*$/, '');
-              return (
-                <div
-                  key={ind.id}
-                  className={`sc-ind-row ${ind.visible ? '' : 'sc-ind-row--hidden'}`}
-                >
-                  {statusCfg.showIndicatorTitles && <span>{displayTitle}</span>}
-                  {ind.visible &&
-                    statusCfg.showIndicatorValues &&
-                    series?.plots.slice(0, 3).map((pl) => {
-                      const val = pl.data[refIdx]?.value;
-                      if (val == null || !Number.isFinite(val)) return null;
-                      return (
-                        <span key={pl.key} style={{ color: pl.color }}>
-                          {formatPrice(
-                            val,
-                            ind.pane === 'overlay' ? effectivePrecision : 2,
-                          )}
+                  {visibleIndicators.map((ind) => {
+                    const series = paneIndicatorSeries.find(
+                      (s) => s.configId === ind.id,
+                    );
+                    const refIdx = legendRefIdx ?? Math.max(0, rawCandles.length - 1);
+                    const rawTitle = series?.title ?? ind.name;
+                    const displayTitle = statusCfg.showIndicatorArguments
+                      ? rawTitle
+                      : rawTitle
+                          .replace(/\s*\([^)]*\)/g, '')
+                          .replace(/\s+\d[\d,\s.]*$/, '');
+                    return (
+                      <div
+                        key={ind.id}
+                        data-testid={`legend-ind-row-${ind.id}`}
+                        className={`sc-ind-row ${ind.visible ? '' : 'sc-ind-row--hidden'}`}
+                      >
+                        {statusCfg.showIndicatorTitles && <span>{displayTitle}</span>}
+                        {ind.visible &&
+                          statusCfg.showIndicatorValues &&
+                          series?.plots.slice(0, 3).map((pl) => {
+                            const val = pl.data[refIdx]?.value;
+                            if (val == null || !Number.isFinite(val)) return null;
+                            return (
+                              <span key={pl.key} style={{ color: pl.color }}>
+                                {formatPrice(
+                                  val,
+                                  ind.pane === 'overlay' ? effectivePrecision : 2,
+                                )}
+                              </span>
+                            );
+                          })}
+                        <span className="sc-ind-actions">
+                          <button
+                            type="button"
+                            className="sc-ind-act-btn"
+                            title={
+                              ind.visible ? 'Nascondi indicatore' : 'Mostra indicatore'
+                            }
+                            aria-label={
+                              ind.visible ? 'Nascondi indicatore' : 'Mostra indicatore'
+                            }
+                            onClick={() => toggleIndicatorVisibility(ind.id, paneIndex)}
+                          >
+                            {ind.visible ? <Eye size={12} /> : <EyeOff size={12} />}
+                          </button>
+                          <button
+                            type="button"
+                            className="sc-ind-act-btn"
+                            title="Impostazioni indicatore"
+                            aria-label={`Impostazioni ${displayTitle}`}
+                            onClick={() => {
+                              onFocusPane(paneIndex);
+                              openIndicatorSettings(ind.id);
+                            }}
+                          >
+                            <Settings size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="sc-ind-act-btn"
+                            title="Rimuovi indicatore"
+                            aria-label={`Rimuovi ${displayTitle}`}
+                            onClick={() => removeIndicator(ind.id, paneIndex)}
+                          >
+                            <X size={12} />
+                          </button>
                         </span>
-                      );
-                    })}
-                  <span className="sc-ind-actions">
-                    <button
-                      type="button"
-                      className="sc-ind-act-btn"
-                      title={
-                        ind.visible ? 'Nascondi indicatore' : 'Mostra indicatore'
-                      }
-                      aria-label={
-                        ind.visible ? 'Nascondi indicatore' : 'Mostra indicatore'
-                      }
-                      onClick={() => toggleIndicatorVisibility(ind.id, paneIndex)}
-                    >
-                      {ind.visible ? <Eye size={12} /> : <EyeOff size={12} />}
-                    </button>
-                    <button
-                      type="button"
-                      className="sc-ind-act-btn"
-                      title="Impostazioni indicatore"
-                      aria-label={`Impostazioni ${displayTitle}`}
-                      onClick={() => {
-                        onFocusPane(paneIndex);
-                        openIndicatorSettings(ind.id);
-                      }}
-                    >
-                      <Settings size={12} />
-                    </button>
-                    <button
-                      type="button"
-                      className="sc-ind-act-btn"
-                      title="Rimuovi indicatore"
-                      aria-label={`Rimuovi ${displayTitle}`}
-                      onClick={() => removeIndicator(ind.id, paneIndex)}
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                </div>
-              );
-            })}
+                      </div>
+                    );
+                  })}
 
-          {compareSeries.map((comp) => {
-            const refTime = legendBar?.time;
-            const compVal =
-              (refTime != null ? comp.byTime.get(refTime) : undefined) ??
-              comp.candles[comp.candles.length - 1]?.close;
-            const compBase =
-              (visStartTime != null ? comp.byTime.get(visStartTime) : undefined) ??
-              comp.candles[0]?.close ??
-              compVal ??
-              1;
-            const compPct =
-              compVal != null && compBase > 0
-                ? ((compVal - compBase) / compBase) * 100
-                : null;
-            const compSym = resolveSymbolInfo(comp.ticker);
-            return (
-              <div key={comp.ticker} className="sc-ind-row">
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: comp.color,
-                    display: 'inline-block',
-                  }}
-                />
-                <span>Confronto: {comp.ticker}</span>
-                {compVal != null && (
-                  <span style={{ color: comp.color }}>
-                    {formatPrice(compVal, compSym.precision)}
-                    {compPct != null ? ` (${formatPercent(compPct)})` : ''}
-                  </span>
+                  {compareSeries.map((comp) => {
+                    const refTime = legendBar?.time;
+                    const compVal =
+                      (refTime != null ? comp.byTime.get(refTime) : undefined) ??
+                      comp.candles[comp.candles.length - 1]?.close;
+                    const compBase =
+                      (visStartTime != null ? comp.byTime.get(visStartTime) : undefined) ??
+                      comp.candles[0]?.close ??
+                      compVal ??
+                      1;
+                    const compPct =
+                      compVal != null && compBase > 0
+                        ? ((compVal - compBase) / compBase) * 100
+                        : null;
+                    const compSym = resolveSymbolInfo(comp.ticker);
+                    return (
+                      <div key={comp.ticker} className="sc-ind-row">
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: comp.color,
+                            display: 'inline-block',
+                          }}
+                        />
+                        <span>Confronto: {comp.ticker}</span>
+                        {compVal != null && (
+                          <span style={{ color: comp.color }}>
+                            {formatPrice(compVal, compSym.precision)}
+                            {compPct != null ? ` (${formatPercent(compPct)})` : ''}
+                          </span>
+                        )}
+                        <span className="sc-ind-actions">
+                          <button
+                            type="button"
+                            className="sc-ind-act-btn"
+                            title={`Rimuovi confronto ${comp.ticker}`}
+                            onClick={() => removeCompareSymbol(comp.ticker, paneIndex)}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="sc-legend-toggler"
+                data-testid="legend-toggler"
+                title={
+                  legendCollapsed
+                    ? `Mostra legenda indicatori (${totalLegendRows})`
+                    : 'Nascondi legenda indicatori'
+                }
+                aria-label={
+                  legendCollapsed
+                    ? 'Espandi legenda indicatori'
+                    : 'Comprimi legenda indicatori'
+                }
+                aria-expanded={!legendCollapsed}
+                onClick={() => setLegendCollapsed((prev) => !prev)}
+              >
+                {legendCollapsed ? (
+                  <>
+                    <ChevronDown size={12} />
+                    <span>{totalLegendRows}</span>
+                  </>
+                ) : (
+                  <ChevronUp size={12} />
                 )}
-                <span className="sc-ind-actions">
-                  <button
-                    type="button"
-                    className="sc-ind-act-btn"
-                    title={`Rimuovi confronto ${comp.ticker}`}
-                    onClick={() => removeCompareSymbol(comp.ticker, paneIndex)}
-                  >
-                    <X size={12} />
-                  </button>
-                </span>
-              </div>
-            );
-          })}
-        </div>
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ======================== SELECTED DRAWING MINI BAR (optional legacy fallback) ======================== */}
@@ -3525,12 +3991,19 @@ export function ChartCanvas({
       )}
 
       {/* ======================== FLOATING NAVIGATION CONTROLS ======================== */}
-      {!(isActivePane && replay.active) && !showToolHintPill && (
-        <div
-          className="sc-nav-controls"
-          role="toolbar"
-          aria-label="Controlli navigazione"
-        >
+      {!(isActivePane && replay.active) &&
+        !showToolHintPill &&
+        (chartSettings.canvas.navButtonsMode ?? 'hover') !== 'never' && (
+          <div
+            className={`sc-nav-controls ${
+              chartSettings.canvas.navButtonsMode === 'always'
+                ? 'sc-nav-controls--always'
+                : ''
+            }`}
+            data-testid="chart-nav-controls"
+            role="toolbar"
+            aria-label="Controlli navigazione"
+          >
           <button
             type="button"
             className="sc-nav-btn"

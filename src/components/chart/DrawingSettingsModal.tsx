@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DRAWING_TOOL_REGISTRY,
+  TIMEFRAMES,
   normalizeDrawingTool,
   type Candle,
   type CanonicalDrawingToolType,
   type DrawingObject,
   type LineStyle,
+  type Timeframe,
 } from '../../types';
 import { useActivePane, useDrawings } from '../../store';
 import {
@@ -17,7 +19,7 @@ import {
 import { DrawingToolIcon } from './DrawingToolbar';
 import '../../styles/drawingTools.css';
 
-type SettingsTab = 'style' | 'text' | 'coords';
+type SettingsTab = 'style' | 'text' | 'coords' | 'visibility';
 
 const STANDARD_FIB_LEVELS: readonly number[] = [
   0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.272, 1.618, 2.618,
@@ -228,6 +230,7 @@ export function DrawingSettingsModal() {
         showStats: snap.showStats,
         inverted: snap.inverted,
         fibLevels: snap.fibLevels,
+        visibleTimeframes: snap.visibleTimeframes,
         stopPrice: snap.stopPrice,
         targetPrice: snap.targetPrice,
       });
@@ -323,6 +326,7 @@ export function DrawingSettingsModal() {
           ? [...STANDARD_FIB_LEVELS]
           : [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618]
         : undefined,
+      visibleTimeframes: undefined,
     };
     patchDrawing(resetPatch);
     syncBuffersFromDrawing({ ...drawing, ...resetPatch, style: resetPatch.style! });
@@ -366,13 +370,14 @@ export function DrawingSettingsModal() {
           </button>
         </div>
 
-        {/* 3 Tabs: Stile | Testo | Coordinate */}
+        {/* 4 Tabs: Stile | Testo | Coordinate | Visibilità (1:1 TradingView) */}
         <div className="sc-drw-tabs" role="tablist" aria-label="Sezioni impostazioni disegno">
           {(
             [
               { id: 'style', label: 'Stile' },
               { id: 'text', label: 'Testo' },
               { id: 'coords', label: 'Coordinate' },
+              { id: 'visibility', label: 'Visibilità' },
             ] as const
           ).map((t) => (
             <button
@@ -970,6 +975,63 @@ export function DrawingSettingsModal() {
                   </div>
                 </div>
               )}
+            </>
+          )}
+
+          {/* ---------------- TAB 4: VISIBILITÀ (1:1 TradingView) ---------------- */}
+          {tab === 'visibility' && (
+            <>
+              <div className="sc-drw-section-title">Visibilità intervalli</div>
+              <label className="sc-drw-check">
+                <input
+                  type="checkbox"
+                  checked={
+                    !drawing.visibleTimeframes ||
+                    drawing.visibleTimeframes.length === 0 ||
+                    drawing.visibleTimeframes.length === TIMEFRAMES.length
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      patchDrawing({ visibleTimeframes: undefined });
+                    } else {
+                      patchDrawing({ visibleTimeframes: [drawing.timeframe ?? '1D'] });
+                    }
+                  }}
+                />
+                <span>Mostra su tutti i timeframe</span>
+              </label>
+
+              <div className="sc-drw-fib-grid" style={{ marginTop: 8 }}>
+                {TIMEFRAMES.map((tf: Timeframe) => {
+                  const allVisible =
+                    !drawing.visibleTimeframes ||
+                    drawing.visibleTimeframes.length === 0;
+                  const checked = allVisible || drawing.visibleTimeframes!.includes(tf);
+                  return (
+                    <label key={tf} className="sc-drw-check">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const baseList: Timeframe[] = allVisible
+                            ? [...TIMEFRAMES]
+                            : [...drawing.visibleTimeframes!];
+                          const nextList = e.target.checked
+                            ? Array.from(new Set([...baseList, tf]))
+                            : baseList.filter((item) => item !== tf);
+                          patchDrawing({
+                            visibleTimeframes:
+                              nextList.length === TIMEFRAMES.length
+                                ? undefined
+                                : nextList,
+                          });
+                        }}
+                      />
+                      <span>{tf}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </>
           )}
         </div>

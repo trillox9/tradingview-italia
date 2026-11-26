@@ -5,7 +5,6 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import type { Candle } from '../types';
 import {
   useActivePane,
   useDrawings,
@@ -25,17 +24,11 @@ import {
   type ChartContextMenuState,
   type PriceAxisPlusPayload,
 } from '../components/chart';
-import {
-  AlertToastStack,
-  BottomDrawer,
-  RightSidebar,
-} from '../components/panels';
+import { AlertToastStack } from '../components/panels';
 
 export function ChartPage() {
   const {
     openModal,
-    rightPanel,
-    toggleRightPanel,
     activeLayoutName,
     saveCurrentLayout,
   } = useTradingView();
@@ -92,8 +85,6 @@ export function ChartPage() {
     }
   }, []);
 
-  const [hoveredCandle, setHoveredCandle] = useState<Candle | null>(null);
-  const [hoveredCandleIndex, setHoveredCandleIndex] = useState<number | null>(null);
   const [rangeSignal, setRangeSignal] = useState<{
     preset: RangePreset;
     seq: number;
@@ -131,14 +122,6 @@ export function ChartPage() {
       }
     };
   }, []);
-
-  const handleHoverCandle = useCallback(
-    (candle: Candle | null, index: number | null) => {
-      setHoveredCandle(candle);
-      setHoveredCandleIndex(index);
-    },
-    [],
-  );
 
   const handleSelectRange = useCallback((preset: RangePreset) => {
     setRangeSignal((prev) => ({ preset, seq: (prev?.seq ?? 0) + 1 }));
@@ -182,6 +165,7 @@ export function ChartPage() {
       timestamp: payload.timestamp,
       drawingId: payload.drawingId,
       paneIndex: payload.paneIndex,
+      priceToBarRatio: payload.priceToBarRatio,
     });
   }, []);
 
@@ -281,6 +265,46 @@ export function ChartPage() {
         return;
       }
 
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+        if (ev.key === 'ArrowUp') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-zoom-in'));
+          return;
+        }
+        if (ev.key === 'ArrowDown') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-zoom-out'));
+          return;
+        }
+        if (ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent('tv-chart-pan-left', { detail: { fast: true } }),
+          );
+          return;
+        }
+        if (ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent('tv-chart-pan-right', { detail: { fast: true } }),
+          );
+          return;
+        }
+      }
+
+      if (ev.altKey && ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
+        if (ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-jump-start'));
+          return;
+        }
+        if (ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-jump-end'));
+          return;
+        }
+      }
+
       if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
         const k = ev.key.toLowerCase();
         if (k === 'r' && ev.shiftKey) {
@@ -289,9 +313,6 @@ export function ChartPage() {
         } else if (k === 'r') {
           ev.preventDefault();
           handleResetView();
-        } else if (k === 'd') {
-          ev.preventDefault();
-          toggleRightPanel('data');
         } else if (k === 'i') {
           ev.preventDefault();
           toggleInvertScale(activePaneIndex);
@@ -357,12 +378,12 @@ export function ChartPage() {
         } else if (ev.key === '-') {
           ev.preventDefault();
           window.dispatchEvent(new CustomEvent('tv-chart-zoom-out'));
-        } else if (ev.key === 'ArrowLeft') {
+        } else if (ev.key === 'ArrowLeft' && !selectedDrawingId) {
           ev.preventDefault();
           window.dispatchEvent(
             new CustomEvent('tv-chart-pan-left', { detail: { fast: ev.shiftKey } }),
           );
-        } else if (ev.key === 'ArrowRight') {
+        } else if (ev.key === 'ArrowRight' && !selectedDrawingId) {
           ev.preventDefault();
           window.dispatchEvent(
             new CustomEvent('tv-chart-pan-right', { detail: { fast: ev.shiftKey } }),
@@ -398,14 +419,13 @@ export function ChartPage() {
     setScaleMode,
     showNotify,
     toggleInvertScale,
-    toggleRightPanel,
     undo,
   ]);
 
   const workspaceClass = [
     'tv-supercharts',
+    'tv-supercharts--no-right',
     showDrawingBar ? '' : 'tv-supercharts--no-drawing',
-    rightPanel === null ? 'tv-supercharts--no-right' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -418,7 +438,7 @@ export function ChartPage() {
         onToggleDrawingBar={handleToggleDrawingBar}
       />
 
-      {/* Left 52px Drawing Toolbar (64 tools across 8 authentic groups) */}
+      {/* Left 52px Drawing Toolbar (64 tools across authentic TradingView groups) */}
       {showDrawingBar && (
         <DrawingToolbar
           canZoomOut={canZoomOut}
@@ -428,13 +448,12 @@ export function ChartPage() {
         />
       )}
 
-      {/* Center Column: Multi-Chart Canvas Stage + Bottom Quick-Range Bar + Resizable Bottom Drawer */}
+      {/* Center Column: Full Edge-to-Edge Multi-Chart Canvas Stage + Bottom Quick-Range Bar */}
       <main className="sc-center-column">
         <div className="sc-chart-stage">
           <MultiChartGrid
             rangeSignal={rangeSignal}
             resetSignal={resetSignal}
-            onHoverCandle={handleHoverCandle}
             onChartContextMenu={handleChartContextMenu}
             onPriceAxisPlusClick={handlePriceAxisPlusClick}
             onZoomHistoryChange={handleZoomHistoryChange}
@@ -446,19 +465,7 @@ export function ChartPage() {
             onOpenPriceScaleMenu={handleOpenPriceScaleMenu}
           />
         </div>
-
-        <BottomDrawer />
       </main>
-
-      {/* Right Area: Mounted ONLY when a pure right panel (Lista/Avvisi/Dati/Oggetti) is open */}
-      {rightPanel !== null && (
-        <div className="sc-right-area">
-          <RightSidebar
-            hoveredCandle={hoveredCandle}
-            hoveredCandleIndex={hoveredCandleIndex}
-          />
-        </div>
-      )}
 
       {/* Floating Draggable Favorites Bar & Active Drawing Style Bar */}
       <FloatingFavoritesBar />
