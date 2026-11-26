@@ -65,6 +65,8 @@ import {
   type AppView,
 } from './router';
 import {
+  DEFAULT_LAYOUT_ID,
+  DEFAULT_LAYOUT_NAME,
   INITIAL_MODAL_STATE,
   INITIAL_REPLAY_STATE,
   LAYOUT_PANE_COUNTS,
@@ -72,34 +74,50 @@ import {
   addSymbolToWatchlistList,
   bringDrawingToFrontMutation,
   clearDrawingsMutation,
+  cloneChartPane,
   cloneDrawingMutation,
+  cloneDrawingsMap,
   computePaneIndicatorSeries,
   createDefaultPanes,
   deleteDrawingMutation,
+  loadPersistedActivePaneIndex,
   loadPersistedActiveWatchlistId,
   loadPersistedChartSettings,
   loadPersistedDrawings,
   loadPersistedFavoriteTools,
+  loadPersistedLayoutMode,
+  loadPersistedLayoutsBundle,
+  loadPersistedPanes,
   loadPersistedShowFavoritesBar,
   loadPersistedTheme,
   loadPersistedWatchlists,
+  loadPersistedWorkspacePrefs,
   normalizeSymbolTicker,
+  parseImportedLayoutJson,
   redoDrawingMutation,
   removeSymbolFromWatchlistList,
   resolveInitialPaneSeriesState,
   resolveSymbolInfo,
+  savePersistedActivePaneIndex,
   savePersistedActiveWatchlistId,
   savePersistedChartSettings,
   savePersistedDrawings,
   savePersistedFavoriteTools,
+  savePersistedLayoutMode,
+  savePersistedLayoutsBundle,
+  savePersistedPanes,
   savePersistedShowFavoritesBar,
   savePersistedTheme,
   savePersistedWatchlists,
+  savePersistedWorkspacePrefs,
   sendDrawingToBackMutation,
+  serializeLayoutForExport,
   sliceCandlesForReplay,
+  syncPaneWithChartSettings,
   undoDrawingMutation,
   updateDrawingMutation,
   type DrawingsBundle,
+  type PersistedWorkspacePrefs,
 } from './stateHelpers';
 import type {
   ActivityLogEntry,
@@ -114,6 +132,7 @@ import type {
   RangePreset,
   ReplayState,
   RightPanelTab,
+  SavedChartLayout,
   ScaleMode,
   ThemeMode,
   TradingViewContextValue,
@@ -266,14 +285,35 @@ export function TradingViewProvider({
     setActivityLog([]);
   }, []);
 
-  // ---- Multi-Chart Panes ----
-  const [layoutMode, setLayoutModeState] = useState<LayoutMode>('1');
-  const [activePaneIndex, setActivePaneIndexState] = useState<number>(0);
+  // ---- Multi-Chart Panes (100% Persisted & Synced with ChartSettings) ----
+  const initialWorkspacePrefs = useMemo(() => loadPersistedWorkspacePrefs(), []);
+
+  const [layoutMode, setLayoutModeState] = useState<LayoutMode>(() =>
+    loadPersistedLayoutMode(),
+  );
+  const [activePaneIndex, setActivePaneIndexState] = useState<number>(() =>
+    loadPersistedActivePaneIndex(layoutMode),
+  );
   const [panes, setPanes] = useState<ChartPaneState[]>(() =>
-    createDefaultPanes(route.view === 'chart' ? route.symbolId : 'FTSEMIB'),
+    loadPersistedPanes(
+      route.view === 'chart' && route.symbolId ? route.symbolId : undefined,
+      chartSettings,
+    ),
   );
   const panesRef = useRef<ChartPaneState[]>(panes);
   panesRef.current = panes;
+
+  useEffect(() => {
+    savePersistedPanes(panes);
+  }, [panes]);
+
+  useEffect(() => {
+    savePersistedLayoutMode(layoutMode);
+  }, [layoutMode]);
+
+  useEffect(() => {
+    savePersistedActivePaneIndex(activePaneIndex);
+  }, [activePaneIndex]);
 
   const setLayoutMode = useCallback((mode: LayoutMode) => {
     setLayoutModeState(mode);
@@ -285,6 +325,17 @@ export function TradingViewProvider({
     setActivePaneIndexState((prev) =>
       index >= 0 && index < 4 ? index : prev,
     );
+  }, []);
+
+  // ---- Indicator Settings Modal State ----
+  const [editingIndicatorId, setEditingIndicatorId] = useState<string | null>(null);
+
+  const openIndicatorSettings = useCallback((indicatorId: string) => {
+    setEditingIndicatorId(indicatorId);
+  }, []);
+
+  const closeIndicatorSettings = useCallback(() => {
+    setEditingIndicatorId(null);
   }, []);
 
   const activePane = panes[activePaneIndex] ?? panes[0];
@@ -501,6 +552,7 @@ export function TradingViewProvider({
         ...prev,
         indicators: prev.indicators.filter((ind) => ind.id !== indicatorId),
       }));
+      setEditingIndicatorId((prev) => (prev === indicatorId ? null : prev));
     },
     [activePaneIndex, updatePane],
   );
@@ -904,10 +956,18 @@ export function TradingViewProvider({
   const [showFavoritesBar, setShowFavoritesBarState] = useState<boolean>(() =>
     loadPersistedShowFavoritesBar(),
   );
-  const [magnetMode, setMagnetMode] = useState<MagnetMode>('off');
-  const [stayInDrawingMode, setStayInDrawingMode] = useState<boolean>(false);
-  const [lockDrawings, setLockDrawings] = useState<boolean>(false);
-  const [hideMode, setHideModeState] = useState<HideMode>('none');
+  const [magnetMode, setMagnetMode] = useState<MagnetMode>(
+    () => initialWorkspacePrefs.magnetMode,
+  );
+  const [stayInDrawingMode, setStayInDrawingMode] = useState<boolean>(
+    () => initialWorkspacePrefs.stayInDrawingMode,
+  );
+  const [lockDrawings, setLockDrawings] = useState<boolean>(
+    () => initialWorkspacePrefs.lockDrawings,
+  );
+  const [hideMode, setHideModeState] = useState<HideMode>(
+    () => initialWorkspacePrefs.hideMode,
+  );
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [selectedDrawingSettingsId, setSelectedDrawingSettingsId] = useState<
     string | null
@@ -1218,9 +1278,16 @@ export function TradingViewProvider({
     ),
   );
 
-  const [liveCryptoEnabled, setLiveCryptoEnabledState] = useState<boolean>(() =>
-    feed.isLiveCryptoEnabled(),
-  );
+  const [liveCryptoEnabled, setLiveCryptoEnabledState] = useState<boolean>(() => {
+    if (
+      !isTestEnvironment() &&
+      initialWorkspacePrefs.liveCryptoEnabled !== undefined
+    ) {
+      feed.setLiveCryptoEnabled(initialWorkspacePrefs.liveCryptoEnabled);
+      return initialWorkspacePrefs.liveCryptoEnabled;
+    }
+    return feed.isLiveCryptoEnabled();
+  });
 
   const setLiveCryptoEnabled = useCallback(
     (enabled: boolean) => {
@@ -1413,11 +1480,17 @@ export function TradingViewProvider({
   );
 
   // ---- Pine Editor & Strategy Tester ----
-  const [pineCode, setPineCode] = useState<string>(PINE_TEMPLATES[0].code);
-  const [pineResult, setPineResult] = useState<PineExecutionResult | null>(() =>
-    candles.length > 0 ? evaluatePineScript(PINE_TEMPLATES[0].code, candles) : null,
+  const [pineCode, setPineCode] = useState<string>(
+    () => initialWorkspacePrefs.pineCode,
   );
-  const [pineAppliedToChart, setPineAppliedToChart] = useState<boolean>(false);
+  const [pineResult, setPineResult] = useState<PineExecutionResult | null>(() =>
+    candles.length > 0
+      ? evaluatePineScript(initialWorkspacePrefs.pineCode, candles)
+      : null,
+  );
+  const [pineAppliedToChart, setPineAppliedToChart] = useState<boolean>(
+    () => initialWorkspacePrefs.pineAppliedToChart,
+  );
 
   useEffect(() => {
     if (displayedCandles.length === 0) return;
@@ -1467,6 +1540,7 @@ export function TradingViewProvider({
       updatePane(targetIdx, { indicators: [] });
       if (targetIdx === activePaneIndex) {
         setPineAppliedToChart(false);
+        setEditingIndicatorId(null);
       }
     },
     [activePaneIndex, updatePane],
@@ -1502,10 +1576,12 @@ export function TradingViewProvider({
             displayedCandles,
             activePane.indicators,
             pineAppliedToChart ? pineResult : null,
+            activePane.timeframe,
           ),
     [
       displayedCandles,
       activePane.indicators,
+      activePane.timeframe,
       pineAppliedToChart,
       pineResult,
       hideMode,
@@ -1522,8 +1598,481 @@ export function TradingViewProvider({
   const [rightPanel, setRightPanel] = useState<RightPanelTab>(null);
   const [bottomPanel, setBottomPanel] = useState<BottomPanelTab>(null);
   const [bottomPanelExpanded, setBottomPanelExpanded] = useState<boolean>(false);
-  const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(280);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(
+    () => initialWorkspacePrefs.bottomPanelHeight,
+  );
   const [modals, setModals] = useState<ModalState>(INITIAL_MODAL_STATE);
+
+  // Persist workspace preferences (drawing modes, Pine script, bottom panel height, liveCryptoEnabled)
+  useEffect(() => {
+    savePersistedWorkspacePrefs({
+      magnetMode,
+      stayInDrawingMode,
+      lockDrawings,
+      hideMode,
+      pineCode,
+      pineAppliedToChart,
+      bottomPanelHeight,
+      liveCryptoEnabled,
+    });
+  }, [
+    magnetMode,
+    stayInDrawingMode,
+    lockDrawings,
+    hideMode,
+    pineCode,
+    pineAppliedToChart,
+    bottomPanelHeight,
+    liveCryptoEnabled,
+  ]);
+
+  // ---- Named Saved Chart Layouts & Salva / Auto-Save Engine ----
+  const initialLayoutsBundle = useMemo(() => {
+    const fallbackLayout: SavedChartLayout = {
+      id: DEFAULT_LAYOUT_ID,
+      name: DEFAULT_LAYOUT_NAME,
+      updatedAt: Date.now(),
+      layoutMode,
+      activePaneIndex,
+      panes: panes.map(cloneChartPane),
+      chartSettings: mergeChartSettings(chartSettings, {}),
+      drawingsBySymbol: cloneDrawingsMap(drawingsBundle.drawingsBySymbol),
+      pineCode,
+      pineAppliedToChart,
+    };
+    return loadPersistedLayoutsBundle(fallbackLayout, theme);
+    // Initialized once at provider mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [savedLayouts, setSavedLayouts] = useState<SavedChartLayout[]>(
+    () => initialLayoutsBundle.savedLayouts,
+  );
+  const [activeLayoutId, setActiveLayoutId] = useState<string>(
+    () => initialLayoutsBundle.activeLayoutId,
+  );
+  const [autoSave, setAutoSaveState] = useState<boolean>(
+    () => initialLayoutsBundle.autoSave,
+  );
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(
+    () => initialLayoutsBundle.lastSavedAt,
+  );
+
+  const activeLayoutName = useMemo(
+    () =>
+      savedLayouts.find((l) => l.id === activeLayoutId)?.name ??
+      DEFAULT_LAYOUT_NAME,
+    [savedLayouts, activeLayoutId],
+  );
+
+  // Keep latest mutable state in a ref for synchronous saveCurrentLayout & beforeunload flush
+  const latestStateRef = useRef({
+    theme,
+    chartSettings,
+    panes,
+    layoutMode,
+    activePaneIndex,
+    drawingsBySymbol: drawingsBundle.drawingsBySymbol,
+    favoriteTools,
+    showFavoritesBar,
+    watchlists,
+    activeWatchlistId,
+    alerts,
+    paperAccount,
+    magnetMode,
+    stayInDrawingMode,
+    lockDrawings,
+    hideMode,
+    pineCode,
+    pineAppliedToChart,
+    bottomPanelHeight,
+    liveCryptoEnabled,
+    savedLayouts,
+    activeLayoutId,
+    activeLayoutName,
+    autoSave,
+    hasUnsavedChanges,
+    lastSavedAt,
+  });
+  latestStateRef.current = {
+    theme,
+    chartSettings,
+    panes,
+    layoutMode,
+    activePaneIndex,
+    drawingsBySymbol: drawingsBundle.drawingsBySymbol,
+    favoriteTools,
+    showFavoritesBar,
+    watchlists,
+    activeWatchlistId,
+    alerts,
+    paperAccount,
+    magnetMode,
+    stayInDrawingMode,
+    lockDrawings,
+    hideMode,
+    pineCode,
+    pineAppliedToChart,
+    bottomPanelHeight,
+    liveCryptoEnabled,
+    savedLayouts,
+    activeLayoutId,
+    activeLayoutName,
+    autoSave,
+    hasUnsavedChanges,
+    lastSavedAt,
+  };
+
+  const buildSnapshotFromRef = useCallback(
+    (id: string, name: string, now: number): SavedChartLayout => {
+      const s = latestStateRef.current;
+      return {
+        id,
+        name: name.trim() || DEFAULT_LAYOUT_NAME,
+        updatedAt: now,
+        layoutMode: s.layoutMode,
+        activePaneIndex: s.activePaneIndex,
+        panes: s.panes.map(cloneChartPane),
+        chartSettings: mergeChartSettings(s.chartSettings, {}),
+        drawingsBySymbol: cloneDrawingsMap(s.drawingsBySymbol),
+        pineCode: s.pineCode,
+        pineAppliedToChart: s.pineAppliedToChart,
+      };
+    },
+    [],
+  );
+
+  const flushAllPersistedState = useCallback(() => {
+    const s = latestStateRef.current;
+    savePersistedTheme(s.theme);
+    savePersistedChartSettings(s.chartSettings);
+    savePersistedPanes(s.panes);
+    savePersistedLayoutMode(s.layoutMode);
+    savePersistedActivePaneIndex(s.activePaneIndex);
+    savePersistedDrawings(s.drawingsBySymbol);
+    savePersistedFavoriteTools(s.favoriteTools);
+    savePersistedShowFavoritesBar(s.showFavoritesBar);
+    savePersistedWatchlists(s.watchlists);
+    savePersistedActiveWatchlistId(s.activeWatchlistId);
+    saveAlerts(s.alerts);
+    savePaperAccount(s.paperAccount);
+    const prefs: PersistedWorkspacePrefs = {
+      magnetMode: s.magnetMode,
+      stayInDrawingMode: s.stayInDrawingMode,
+      lockDrawings: s.lockDrawings,
+      hideMode: s.hideMode,
+      pineCode: s.pineCode,
+      pineAppliedToChart: s.pineAppliedToChart,
+      bottomPanelHeight: s.bottomPanelHeight,
+      liveCryptoEnabled: s.liveCryptoEnabled,
+    };
+    savePersistedWorkspacePrefs(prefs);
+    savePersistedLayoutsBundle({
+      savedLayouts: s.savedLayouts,
+      activeLayoutId: s.activeLayoutId,
+      autoSave: s.autoSave,
+      lastSavedAt: s.lastSavedAt,
+    });
+  }, []);
+
+  // Synchronous flush on page unload/reload so recent edits NEVER vanish
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onBeforeUnload = () => {
+      flushAllPersistedState();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [flushAllPersistedState]);
+
+  const didMountLayoutRef = useRef(false);
+  const suppressLayoutDirtyRef = useRef(false);
+
+  const saveCurrentLayout = useCallback(() => {
+    const s = latestStateRef.current;
+    const now = Date.now();
+    const snapshot = buildSnapshotFromRef(s.activeLayoutId, s.activeLayoutName, now);
+    const exists = s.savedLayouts.some((l) => l.id === s.activeLayoutId);
+    const nextLayouts = exists
+      ? s.savedLayouts.map((l) => (l.id === s.activeLayoutId ? snapshot : l))
+      : [snapshot, ...s.savedLayouts];
+
+    setSavedLayouts(nextLayouts);
+    setHasUnsavedChanges(false);
+    setLastSavedAt(now);
+
+    latestStateRef.current = {
+      ...s,
+      savedLayouts: nextLayouts,
+      hasUnsavedChanges: false,
+      lastSavedAt: now,
+    };
+    flushAllPersistedState();
+
+    appendLog({
+      category: 'system',
+      level: 'success',
+      title: `Layout salvato: ${snapshot.name}`,
+      detail: `${snapshot.panes[snapshot.activePaneIndex]?.symbolId ?? 'FTSEMIB'} (${snapshot.panes[snapshot.activePaneIndex]?.timeframe ?? '1D'})`,
+    });
+  }, [appendLog, buildSnapshotFromRef, flushAllPersistedState]);
+
+  // Track changes to layout-owned state: auto-save when autoSave=true, otherwise flag hasUnsavedChanges
+  useEffect(() => {
+    if (!didMountLayoutRef.current) {
+      didMountLayoutRef.current = true;
+      return;
+    }
+    if (suppressLayoutDirtyRef.current) {
+      suppressLayoutDirtyRef.current = false;
+      return;
+    }
+
+    const s = latestStateRef.current;
+    if (s.autoSave) {
+      const now = Date.now();
+      const snapshot = buildSnapshotFromRef(s.activeLayoutId, s.activeLayoutName, now);
+      const exists = s.savedLayouts.some((l) => l.id === s.activeLayoutId);
+      const nextLayouts = exists
+        ? s.savedLayouts.map((l) => (l.id === s.activeLayoutId ? snapshot : l))
+        : [snapshot, ...s.savedLayouts];
+      setSavedLayouts(nextLayouts);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(now);
+      savePersistedLayoutsBundle({
+        savedLayouts: nextLayouts,
+        activeLayoutId: s.activeLayoutId,
+        autoSave: true,
+        lastSavedAt: now,
+      });
+    } else {
+      setHasUnsavedChanges(true);
+    }
+  }, [
+    panes,
+    layoutMode,
+    activePaneIndex,
+    chartSettings,
+    drawingsBundle.drawingsBySymbol,
+    pineCode,
+    pineAppliedToChart,
+    buildSnapshotFromRef,
+  ]);
+
+  const setAutoSave = useCallback(
+    (enabled: boolean) => {
+      setAutoSaveState(enabled);
+      const s = latestStateRef.current;
+      latestStateRef.current = { ...s, autoSave: enabled };
+      if (enabled && s.hasUnsavedChanges) {
+        saveCurrentLayout();
+      } else {
+        savePersistedLayoutsBundle({
+          savedLayouts: s.savedLayouts,
+          activeLayoutId: s.activeLayoutId,
+          autoSave: enabled,
+          lastSavedAt: s.lastSavedAt,
+        });
+      }
+    },
+    [saveCurrentLayout],
+  );
+
+  const renameActiveLayout = useCallback(
+    (name: string) => {
+      const cleanName = name.trim() || DEFAULT_LAYOUT_NAME;
+      const s = latestStateRef.current;
+      const now = Date.now();
+      const nextLayouts = s.savedLayouts.map((l) =>
+        l.id === s.activeLayoutId ? { ...l, name: cleanName, updatedAt: now } : l,
+      );
+      setSavedLayouts(nextLayouts);
+      setLastSavedAt(now);
+      savePersistedLayoutsBundle({
+        savedLayouts: nextLayouts,
+        activeLayoutId: s.activeLayoutId,
+        autoSave: s.autoSave,
+        lastSavedAt: now,
+      });
+      appendLog({
+        category: 'system',
+        level: 'info',
+        title: `Layout rinominato in "${cleanName}"`,
+      });
+    },
+    [appendLog],
+  );
+
+  const duplicateActiveLayout = useCallback(
+    (name?: string) => {
+      const s = latestStateRef.current;
+      const now = Date.now();
+      const newId = `layout-${now}-${Math.floor(Math.random() * 10000)}`;
+      const copyName = name?.trim() || `${s.activeLayoutName} (copia)`;
+      const copySnapshot = buildSnapshotFromRef(newId, copyName, now);
+      const nextLayouts = [copySnapshot, ...s.savedLayouts];
+
+      setSavedLayouts(nextLayouts);
+      setActiveLayoutId(newId);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(now);
+      savePersistedLayoutsBundle({
+        savedLayouts: nextLayouts,
+        activeLayoutId: newId,
+        autoSave: s.autoSave,
+        lastSavedAt: now,
+      });
+      appendLog({
+        category: 'system',
+        level: 'success',
+        title: `Copia layout creata: "${copyName}"`,
+      });
+    },
+    [appendLog, buildSnapshotFromRef],
+  );
+
+  const applySavedLayoutToWorkspace = useCallback(
+    (target: SavedChartLayout, nextLayouts: SavedChartLayout[]) => {
+      suppressLayoutDirtyRef.current = true;
+      const syncedPanes = target.panes.map((p, idx) =>
+        idx === target.activePaneIndex
+          ? syncPaneWithChartSettings(cloneChartPane(p), target.chartSettings)
+          : cloneChartPane(p),
+      );
+      const clonedDrawings = cloneDrawingsMap(target.drawingsBySymbol);
+      const clonedSettings = mergeChartSettings(target.chartSettings, {});
+
+      setLayoutModeState(target.layoutMode);
+      setActivePaneIndexState(target.activePaneIndex);
+      setPanes(syncedPanes);
+      setChartSettingsState(clonedSettings);
+      setDrawingsBundle({
+        drawingsBySymbol: clonedDrawings,
+        historyBySymbol: {},
+      });
+      setSelectedDrawingId(null);
+      setEditingIndicatorId(null);
+      setPineCode(target.pineCode);
+      setPineAppliedToChart(target.pineAppliedToChart);
+      setSavedLayouts(nextLayouts);
+      setActiveLayoutId(target.id);
+      setHasUnsavedChanges(false);
+      setLastSavedAt(target.updatedAt);
+
+      savePersistedPanes(syncedPanes);
+      savePersistedLayoutMode(target.layoutMode);
+      savePersistedActivePaneIndex(target.activePaneIndex);
+      savePersistedChartSettings(clonedSettings);
+      savePersistedDrawings(clonedDrawings);
+      savePersistedLayoutsBundle({
+        savedLayouts: nextLayouts,
+        activeLayoutId: target.id,
+        autoSave: latestStateRef.current.autoSave,
+        lastSavedAt: target.updatedAt,
+      });
+    },
+    [],
+  );
+
+  const loadSavedLayout = useCallback(
+    (id: string) => {
+      const s = latestStateRef.current;
+      const target = s.savedLayouts.find((l) => l.id === id);
+      if (!target) return;
+      applySavedLayoutToWorkspace(target, s.savedLayouts);
+      appendLog({
+        category: 'system',
+        level: 'info',
+        title: `Layout caricato: "${target.name}"`,
+      });
+    },
+    [appendLog, applySavedLayoutToWorkspace],
+  );
+
+  const deleteSavedLayout = useCallback(
+    (id: string) => {
+      const s = latestStateRef.current;
+      if (s.savedLayouts.length <= 1) return;
+      const remaining = s.savedLayouts.filter((l) => l.id !== id);
+      if (id === s.activeLayoutId && remaining[0]) {
+        applySavedLayoutToWorkspace(remaining[0], remaining);
+      } else {
+        setSavedLayouts(remaining);
+        savePersistedLayoutsBundle({
+          savedLayouts: remaining,
+          activeLayoutId: s.activeLayoutId,
+          autoSave: s.autoSave,
+          lastSavedAt: s.lastSavedAt,
+        });
+      }
+      appendLog({
+        category: 'system',
+        level: 'warning',
+        title: 'Layout eliminato',
+      });
+    },
+    [appendLog, applySavedLayoutToWorkspace],
+  );
+
+  const createNewLayout = useCallback(
+    (name?: string) => {
+      const s = latestStateRef.current;
+      const now = Date.now();
+      const newId = `layout-${now}-${Math.floor(Math.random() * 10000)}`;
+      const freshSettings = getDefaultChartSettings(themeRef.current);
+      const freshPanes = createDefaultPanes('FTSEMIB').map((p) =>
+        syncPaneWithChartSettings(p, freshSettings),
+      );
+      const freshName =
+        name?.trim() || `Layout ${s.savedLayouts.length + 1}`;
+      const freshLayout: SavedChartLayout = {
+        id: newId,
+        name: freshName,
+        updatedAt: now,
+        layoutMode: '1',
+        activePaneIndex: 0,
+        panes: freshPanes,
+        chartSettings: freshSettings,
+        drawingsBySymbol: {},
+        pineCode: PINE_TEMPLATES[0].code,
+        pineAppliedToChart: false,
+      };
+      const nextLayouts = [freshLayout, ...s.savedLayouts];
+      applySavedLayoutToWorkspace(freshLayout, nextLayouts);
+      appendLog({
+        category: 'system',
+        level: 'success',
+        title: `Nuovo layout creato: "${freshName}"`,
+      });
+    },
+    [appendLog, applySavedLayoutToWorkspace],
+  );
+
+  const exportLayoutJson = useCallback((): string => {
+    const s = latestStateRef.current;
+    const snap = buildSnapshotFromRef(s.activeLayoutId, s.activeLayoutName, Date.now());
+    return serializeLayoutForExport(snap);
+  }, [buildSnapshotFromRef]);
+
+  const importLayoutJson = useCallback(
+    (json: string): { ok: boolean; error?: string } => {
+      const parsed = parseImportedLayoutJson(json, themeRef.current);
+      if (!parsed.ok) {
+        return { ok: false, error: parsed.error };
+      }
+      const s = latestStateRef.current;
+      const nextLayouts = [parsed.layout, ...s.savedLayouts];
+      applySavedLayoutToWorkspace(parsed.layout, nextLayouts);
+      appendLog({
+        category: 'system',
+        level: 'success',
+        title: `Layout importato: "${parsed.layout.name}"`,
+      });
+      return { ok: true };
+    },
+    [appendLog, applySavedLayoutToWorkspace],
+  );
 
   const toggleRightPanel = useCallback((panel: Exclude<RightPanelTab, null>) => {
     setRightPanel((prev) => (prev === panel ? null : panel));
@@ -1576,6 +2125,24 @@ export function TradingViewProvider({
       chartSettings,
       updateChartSettings,
       resetChartSettings,
+      savedLayouts,
+      activeLayoutId,
+      activeLayoutName,
+      autoSave,
+      hasUnsavedChanges,
+      lastSavedAt,
+      saveCurrentLayout,
+      setAutoSave,
+      renameActiveLayout,
+      duplicateActiveLayout,
+      loadSavedLayout,
+      deleteSavedLayout,
+      createNewLayout,
+      exportLayoutJson,
+      importLayoutJson,
+      editingIndicatorId,
+      openIndicatorSettings,
+      closeIndicatorSettings,
       route,
       navigate,
       openSymbolInChart,
@@ -1713,6 +2280,24 @@ export function TradingViewProvider({
       chartSettings,
       updateChartSettings,
       resetChartSettings,
+      savedLayouts,
+      activeLayoutId,
+      activeLayoutName,
+      autoSave,
+      hasUnsavedChanges,
+      lastSavedAt,
+      saveCurrentLayout,
+      setAutoSave,
+      renameActiveLayout,
+      duplicateActiveLayout,
+      loadSavedLayout,
+      deleteSavedLayout,
+      createNewLayout,
+      exportLayoutJson,
+      importLayoutJson,
+      editingIndicatorId,
+      openIndicatorSettings,
+      closeIndicatorSettings,
       route,
       navigate,
       openSymbolInChart,
@@ -1889,6 +2474,10 @@ export function useActivePane() {
       panes: ctx.panes,
       pane: ctx.activePane,
       activePane: ctx.activePane,
+      indicators: ctx.activePane.indicators,
+      editingIndicatorId: ctx.editingIndicatorId,
+      openIndicatorSettings: ctx.openIndicatorSettings,
+      closeIndicatorSettings: ctx.closeIndicatorSettings,
       symbol: ctx.activeSymbol,
       activeSymbol: ctx.activeSymbol,
       chartSettings: ctx.chartSettings,
@@ -1937,6 +2526,9 @@ export function useActivePane() {
       ctx.setActivePaneIndex,
       ctx.panes,
       ctx.activePane,
+      ctx.editingIndicatorId,
+      ctx.openIndicatorSettings,
+      ctx.closeIndicatorSettings,
       ctx.activeSymbol,
       ctx.chartSettings,
       ctx.updateChartSettings,

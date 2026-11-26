@@ -1,3 +1,5 @@
+import type { Timeframe } from './market';
+
 export type IndicatorType =
   | 'SMA'
   | 'EMA'
@@ -33,6 +35,10 @@ export interface IndicatorConfig {
   pane: IndicatorPane;
   params: Record<string, number | string>;
   styles: Record<string, IndicatorStyleSpec>;
+  /** Optional primary line style override for Indicator Settings Stile tab */
+  lineStyle?: LineStyle;
+  /** Optional timeframe visibility filter (empty/undefined = visible on all timeframes) */
+  visibleTimeframes?: Timeframe[];
 }
 
 export interface SeriesPoint {

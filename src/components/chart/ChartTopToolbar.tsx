@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   Bell,
   Camera,
+  Check,
   ChevronDown,
+  Cloud,
+  Copy,
+  Download,
   Eye,
+  FilePlus2,
   Flame,
   Keyboard,
   Layers,
@@ -13,6 +18,7 @@ import {
   Menu,
   Minimize2,
   Moon,
+  Pencil,
   PenTool,
   Plus,
   Redo2,
@@ -21,8 +27,11 @@ import {
   SlidersHorizontal,
   Star,
   Sun,
+  Trash2,
   Undo2,
+  Upload,
 } from 'lucide-react';
+import '../../styles/layoutSave.css';
 import {
   CHART_TYPES_META,
   TIMEFRAMES,
@@ -198,7 +207,20 @@ function LayoutPreviewSvg({ mode }: { mode: LayoutMode }) {
   );
 }
 
-type OpenMenu = 'main' | 'timeframe' | 'style' | 'layout' | null;
+type OpenMenu = 'main' | 'timeframe' | 'style' | 'layout' | 'saveLayout' | null;
+
+function formatSavedTime(timestamp: number | null): string {
+  if (!timestamp) return 'Non ancora salvato';
+  try {
+    return new Intl.DateTimeFormat('it-IT', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(timestamp));
+  } catch {
+    return 'Salvato';
+  }
+}
 
 export function ChartTopToolbar({
   showDrawingBar,
@@ -213,6 +235,21 @@ export function ChartTopToolbar({
     toggleRightPanel,
     bottomPanel,
     toggleBottomPanel,
+    savedLayouts,
+    activeLayoutId,
+    activeLayoutName,
+    autoSave,
+    hasUnsavedChanges,
+    lastSavedAt,
+    saveCurrentLayout,
+    setAutoSave,
+    renameActiveLayout,
+    duplicateActiveLayout,
+    loadSavedLayout,
+    deleteSavedLayout,
+    createNewLayout,
+    exportLayoutJson,
+    importLayoutJson,
   } = useTradingView();
 
   const {
@@ -242,7 +279,25 @@ export function ChartTopToolbar({
     left: 6,
   });
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [renamingLayout, setRenamingLayout] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(activeLayoutName);
+  const [importStatus, setImportStatus] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const savedTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) {
+        window.clearTimeout(savedTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -253,14 +308,26 @@ export function ChartTopToolbar({
   }, []);
 
   useEffect(() => {
-    if (!openMenu) return;
+    if (!openMenu) {
+      setRenamingLayout(false);
+      setImportStatus(null);
+      return;
+    }
     const onPointerDown = (ev: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(ev.target as Node)) {
+      const target = ev.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current && !menuRef.current.contains(target)) {
         setOpenMenu(null);
       }
     };
     const onKeyDown = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') setOpenMenu(null);
+      if (ev.key === 'Escape') {
+        if (renamingLayout) {
+          setRenamingLayout(false);
+          return;
+        }
+        setOpenMenu(null);
+      }
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -268,21 +335,304 @@ export function ChartTopToolbar({
       document.removeEventListener('mousedown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [openMenu]);
+  }, [openMenu, renamingLayout]);
 
-  const toggleMenuAt = (menu: Exclude<OpenMenu, null>, el: HTMLElement) => {
+  const toggleMenuAt = (
+    menu: Exclude<OpenMenu, null>,
+    el: HTMLElement,
+    menuWidth = 236,
+  ) => {
     if (openMenu === menu) {
       setOpenMenu(null);
       return;
     }
+    triggerRef.current = el;
     const rect = el.getBoundingClientRect();
-    const maxLeft = Math.max(6, window.innerWidth - 246);
+    const maxLeft = Math.max(6, window.innerWidth - (menuWidth + 12));
     setMenuPos({
       top: Math.round(rect.bottom + 4),
       left: Math.max(6, Math.min(Math.round(rect.left), maxLeft)),
     });
     setOpenMenu(menu);
   };
+
+  const triggerSavedFeedback = () => {
+    setJustSaved(true);
+    if (savedTimerRef.current !== null) {
+      window.clearTimeout(savedTimerRef.current);
+    }
+    savedTimerRef.current = window.setTimeout(() => {
+      setJustSaved(false);
+      savedTimerRef.current = null;
+    }, 1600);
+  };
+
+  const handleManualSave = (closeDropdown = false) => {
+    saveCurrentLayout();
+    triggerSavedFeedback();
+    if (closeDropdown) setOpenMenu(null);
+  };
+
+  const handleStartRename = () => {
+    setRenameDraft(activeLayoutName);
+    setRenamingLayout(true);
+    setImportStatus(null);
+  };
+
+  const handleCommitRename = (ev?: FormEvent) => {
+    ev?.preventDefault();
+    const trimmed = renameDraft.trim();
+    if (trimmed) {
+      renameActiveLayout(trimmed);
+    }
+    setRenamingLayout(false);
+  };
+
+  const handleExportLayout = () => {
+    const json = exportLayoutJson();
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const slug =
+      (activeLayoutName || 'layout')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/gi, '-')
+        .replace(/^-+|-+$/g, '') || 'layout';
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${slug}.tradingview.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 500);
+    setImportStatus({ ok: true, message: `Esportato ${slug}.tradingview.json` });
+  };
+
+  const handleImportFile = async (ev: ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = importLayoutJson(text);
+      if (res.ok) {
+        triggerSavedFeedback();
+        setImportStatus({ ok: true, message: 'Layout importato correttamente.' });
+      } else {
+        setImportStatus({
+          ok: false,
+          message: res.error || 'File layout JSON non valido.',
+        });
+      }
+    } catch {
+      setImportStatus({
+        ok: false,
+        message: 'Impossibile leggere il file selezionato.',
+      });
+    }
+  };
+
+  const renderSaveLayoutControls = ({
+    closeOnLoad,
+  }: {
+    closeOnLoad: boolean;
+  }) => (
+    <>
+      <div className="sc-save-status-bar">
+        <span className="sc-save-status-title">{activeLayoutName}</span>
+        <span
+          className={`sc-save-status-sub ${
+            hasUnsavedChanges ? 'sc-save-status-sub--dirty' : ''
+          }`}
+        >
+          {justSaved
+            ? 'Salvato ora'
+            : hasUnsavedChanges
+              ? 'Modifiche non salvate'
+              : autoSave
+                ? `Salvataggio automatico · ${formatSavedTime(lastSavedAt)}`
+                : `Ultimo salvataggio: ${formatSavedTime(lastSavedAt)}`}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        onClick={() => handleManualSave(closeOnLoad)}
+      >
+        <span className="sc-menu-item-left">
+          {justSaved ? <Check size={15} /> : <Cloud size={15} />}
+          {justSaved ? 'Salvato ✓' : 'Salva ora'}
+        </span>
+        <span className="sc-menu-kbd">Ctrl + S</span>
+      </button>
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        aria-pressed={autoSave}
+        onClick={() => setAutoSave(!autoSave)}
+      >
+        <span className="sc-menu-item-left">
+          <Cloud size={15} />
+          Salvataggio automatico
+        </span>
+        <span className={`sc-switch ${autoSave ? 'sc-switch--on' : ''}`} />
+      </button>
+
+      <div className="sc-menu-sep" />
+
+      {renamingLayout ? (
+        <form
+          className="sc-save-rename-form"
+          onSubmit={handleCommitRename}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="text"
+            className="sc-save-rename-input"
+            value={renameDraft}
+            aria-label="Nome del layout"
+            placeholder="Nome layout..."
+            autoFocus
+            onChange={(e) => setRenameDraft(e.target.value)}
+          />
+          <button type="submit" className="sc-save-rename-ok">
+            OK
+          </button>
+          <button
+            type="button"
+            className="sc-save-rename-cancel"
+            onClick={() => setRenamingLayout(false)}
+          >
+            Annulla
+          </button>
+        </form>
+      ) : (
+        <button
+          type="button"
+          className="sc-menu-item"
+          onClick={handleStartRename}
+        >
+          <span className="sc-menu-item-left">
+            <Pencil size={15} />
+            Rinomina…
+          </span>
+        </button>
+      )}
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        onClick={() => {
+          duplicateActiveLayout();
+          triggerSavedFeedback();
+          if (closeOnLoad) setOpenMenu(null);
+        }}
+      >
+        <span className="sc-menu-item-left">
+          <Copy size={15} />
+          Crea una copia…
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        onClick={() => {
+          createNewLayout();
+          if (closeOnLoad) setOpenMenu(null);
+        }}
+      >
+        <span className="sc-menu-item-left">
+          <FilePlus2 size={15} />
+          Nuovo layout
+        </span>
+      </button>
+
+      <div className="sc-menu-sep" />
+      <div className="sc-menu-section">I tuoi layout ({savedLayouts.length})</div>
+
+      <div className="sc-save-layouts-list">
+        {savedLayouts.map((layout) => {
+          const isCurrent = layout.id === activeLayoutId;
+          const primaryTicker = layout.panes[0]?.symbolId ?? '';
+          return (
+            <div key={layout.id} className="sc-save-layout-row">
+              <button
+                type="button"
+                className={`sc-save-layout-pick ${
+                  isCurrent ? 'sc-save-layout-pick--active' : ''
+                }`}
+                onClick={() => {
+                  loadSavedLayout(layout.id);
+                  if (closeOnLoad) setOpenMenu(null);
+                }}
+              >
+                <span className="sc-menu-item-left" style={{ minWidth: 0 }}>
+                  {isCurrent && <Check size={13} />}
+                  <span className="sc-save-layout-title">{layout.name}</span>
+                </span>
+                <span className="sc-save-layout-meta">
+                  {primaryTicker}
+                </span>
+              </button>
+              {savedLayouts.length > 1 && (
+                <button
+                  type="button"
+                  className="sc-save-layout-del"
+                  title={`Elimina ${layout.name}`}
+                  aria-label={`Elimina layout ${layout.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteSavedLayout(layout.id);
+                  }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="sc-menu-sep" />
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        onClick={handleExportLayout}
+      >
+        <span className="sc-menu-item-left">
+          <Download size={15} />
+          Esporta layout (JSON)
+        </span>
+      </button>
+
+      <button
+        type="button"
+        className="sc-menu-item"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <span className="sc-menu-item-left">
+          <Upload size={15} />
+          Importa layout (JSON)
+        </span>
+      </button>
+
+      {importStatus && (
+        <div
+          className={`sc-save-import-feedback ${
+            importStatus.ok
+              ? 'sc-save-import-feedback--ok'
+              : 'sc-save-import-feedback--err'
+          }`}
+          role="status"
+        >
+          {importStatus.message}
+        </div>
+      )}
+    </>
+  );
 
   const handleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -402,7 +752,7 @@ export function ChartTopToolbar({
         <button
           type="button"
           className="sc-tb-btn sc-ind-trigger"
-          title="Indicatori, metriche e strategie (/)"
+          title="Indicatori, metriche e strategie"
           aria-label="Indicatori, metriche e strategie"
           onClick={() => openModal('indicators')}
         >
@@ -492,6 +842,53 @@ export function ChartTopToolbar({
         >
           <LayoutGrid size={16} />
         </button>
+
+        {/* Save Layout Cloud Split Button (Desktop) */}
+        <div
+          className={`sc-save-split sc-desktop-only ${
+            openMenu === 'saveLayout' ? 'sc-save-split--open' : ''
+          }`}
+        >
+          <button
+            type="button"
+            className={`sc-save-main ${justSaved ? 'sc-save-main--saved' : ''}`}
+            title="Salva layout (Ctrl+S)"
+            aria-label={`Salva layout ${activeLayoutName}`}
+            onClick={() => handleManualSave(false)}
+          >
+            <span className="sc-save-icon-wrap">
+              {justSaved ? <Check size={14} /> : <Cloud size={15} />}
+              {hasUnsavedChanges && !justSaved && (
+                <span className="sc-save-dirty-dot" aria-hidden="true" />
+              )}
+            </span>
+            <span className="sc-save-name">
+              {justSaved ? 'Salvato ✓' : activeLayoutName}
+            </span>
+          </button>
+          <span className="sc-save-split-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="sc-save-caret"
+            title="Gestisci layout"
+            aria-label="Gestisci layout"
+            aria-haspopup="menu"
+            aria-expanded={openMenu === 'saveLayout'}
+            onClick={(e) => toggleMenuAt('saveLayout', e.currentTarget, 284)}
+          >
+            <ChevronDown size={13} />
+          </button>
+        </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          aria-hidden="true"
+          tabIndex={-1}
+          style={{ display: 'none' }}
+          onChange={handleImportFile}
+        />
 
         <div className="sc-tb-divider sc-desktop-only" />
 
@@ -803,6 +1200,14 @@ export function ChartTopToolbar({
             <span className="sc-menu-item-left"><Camera size={15} /> Istantanea grafico</span>
           </button>
 
+          <div className="sc-menu-sep sc-mobile-menu-only" />
+          <div className="sc-mobile-menu-only" style={{ flexDirection: 'column', width: '100%' }}>
+            <div className="sc-menu-section">Layout salvati</div>
+            {renderSaveLayoutControls({ closeOnLoad: false })}
+          </div>
+
+          <div className="sc-menu-sep" />
+
           <button
             type="button"
             className="sc-menu-item"
@@ -817,6 +1222,18 @@ export function ChartTopToolbar({
             </span>
             <span className="sc-menu-kbd">Ctrl + /</span>
           </button>
+        </div>
+      )}
+
+      {openMenu === 'saveLayout' && (
+        <div
+          ref={menuRef}
+          className="sc-menu sc-save-menu"
+          style={{ top: menuPos.top, left: menuPos.left }}
+          role="menu"
+          aria-label="Gestisci layout"
+        >
+          {renderSaveLayoutControls({ closeOnLoad: true })}
         </div>
       )}
 

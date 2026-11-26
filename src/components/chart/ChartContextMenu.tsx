@@ -95,6 +95,7 @@ function GearGlyph() {
 function MenuItem({
   label,
   shortcut,
+  title,
   checked,
   radio,
   icon,
@@ -107,6 +108,7 @@ function MenuItem({
 }: {
   label: string;
   shortcut?: string;
+  title?: string;
   checked?: boolean;
   radio?: boolean;
   icon?: ReactNode;
@@ -120,6 +122,7 @@ function MenuItem({
   return (
     <button
       type="button"
+      title={title}
       role={checked !== undefined ? (radio ? 'menuitemradio' : 'menuitemcheckbox') : 'menuitem'}
       aria-checked={checked}
       aria-haspopup={hasSubmenu ? 'menu' : undefined}
@@ -225,6 +228,7 @@ export function ChartContextMenu({
     drawingsBySymbol,
     hideDrawings,
     setHideDrawings,
+    lockDrawings,
     addDrawing,
     updateDrawing,
     deleteDrawing,
@@ -541,7 +545,6 @@ export function ChartContextMenu({
               />
               <MenuItem
                 label="Auto (adatta i dati allo schermo)"
-                shortcut="Alt+A"
                 checked={targetPane.autoScale}
                 onClick={() => {
                   toggleAutoScale(targetPaneIdx);
@@ -888,11 +891,15 @@ export function ChartContextMenu({
                 label="Rimuovi"
                 shortcut="Canc"
                 danger
-                disabled={!targetDrawing}
+                disabled={!targetDrawing || Boolean(targetDrawing.locked || lockDrawings)}
+                title={
+                  targetDrawing?.locked || lockDrawings
+                    ? 'Sblocca il disegno prima di eliminarlo'
+                    : undefined
+                }
                 onClick={() => {
-                  if (targetDrawing) {
-                    deleteDrawing(targetSymbol.ticker, targetDrawing.id);
-                  }
+                  if (!targetDrawing || targetDrawing.locked || lockDrawings) return;
+                  deleteDrawing(targetSymbol.ticker, targetDrawing.id);
                   onClose();
                 }}
               />

@@ -23,8 +23,13 @@ function getDrawingLabelIt(type: DrawingToolType): string {
 }
 
 export function ObjectTreePanel() {
-  const { openModal, pineAppliedToChart, pineResult, clearPineFromChart } =
-    useTradingView();
+  const {
+    openModal,
+    openIndicatorSettings,
+    pineAppliedToChart,
+    pineResult,
+    clearPineFromChart,
+  } = useTradingView();
   const {
     activePane,
     activeSymbol,
@@ -34,6 +39,7 @@ export function ObjectTreePanel() {
   } = useActivePane();
   const {
     drawings,
+    lockDrawings,
     selectedDrawingId,
     setSelectedDrawingId,
     updateDrawing,
@@ -126,6 +132,15 @@ export function ObjectTreePanel() {
                     </span>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                      <button
+                        type="button"
+                        className="tv-panel-icon-btn"
+                        title="Impostazioni indicatore"
+                        aria-label="Impostazioni indicatore"
+                        onClick={() => openIndicatorSettings(ind.id)}
+                      >
+                        <Settings size={13} />
+                      </button>
                       <button
                         type="button"
                         className="tv-panel-icon-btn"
@@ -300,8 +315,26 @@ export function ObjectTreePanel() {
                     <button
                       type="button"
                       className="tv-panel-icon-btn"
-                      title="Elimina disegno"
-                      onClick={() => deleteDrawing(activeSymbol.ticker, drw.id)}
+                      disabled={drw.locked || lockDrawings}
+                      style={{
+                        opacity: drw.locked || lockDrawings ? 0.35 : 1,
+                        cursor:
+                          drw.locked || lockDrawings ? 'not-allowed' : 'pointer',
+                      }}
+                      title={
+                        drw.locked || lockDrawings
+                          ? 'Sblocca il disegno prima di eliminarlo'
+                          : 'Elimina disegno'
+                      }
+                      aria-label={
+                        drw.locked || lockDrawings
+                          ? 'Disegno bloccato'
+                          : 'Elimina disegno'
+                      }
+                      onClick={() => {
+                        if (drw.locked || lockDrawings) return;
+                        deleteDrawing(activeSymbol.ticker, drw.id);
+                      }}
                     >
                       <Trash2 size={12} />
                     </button>

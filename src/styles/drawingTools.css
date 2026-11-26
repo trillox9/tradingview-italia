@@ -467,7 +467,7 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
   transition: background 100ms ease, color 100ms ease;
 }
 
-.sc-fdt-btn:hover {
+.sc-fdt-btn:hover:not(:disabled) {
   background: var(--dt-hover);
   color: var(--dt-text-strong);
 }
@@ -477,9 +477,14 @@ html.theme-dark:not([data-theme='light']) .sc-drw-modal-backdrop {
   color: var(--dt-active-text);
 }
 
-.sc-fdt-btn--danger:hover {
+.sc-fdt-btn--danger:hover:not(:disabled) {
   color: var(--dt-danger);
   background: rgba(242, 54, 69, 0.14);
+}
+
+.sc-fdt-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .sc-fdt-sep {

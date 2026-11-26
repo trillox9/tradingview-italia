@@ -33,6 +33,9 @@
    4b. Authentic 6-Tab ChartSettingsModal Controls
    -------------------------------------------------------------------------- */
 .tvs-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   gap: 2px;
   padding: 14px 20px 24px;
 }
@@ -307,6 +310,50 @@
 
 .tvs-template-item:hover {
   background-color: var(--tv-bg-hover, #222222);
+}
+
+/* IndicatorSettingsModal tabs & timeframe visibility grid */
+.tvs-ind-tabs {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--tv-border, #303030);
+  background-color: var(--tv-bg-primary, #131313);
+  flex-shrink: 0;
+}
+
+.tvs-ind-tf-quick {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 6px;
+}
+
+.tvs-tf-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.tvs-tf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--tv-radius-sm, 6px);
+  background-color: var(--tv-bg-primary, #131313);
+  border: 1px solid var(--tv-border-subtle, #222222);
+  font-size: 0.82rem;
+  color: var(--tv-text-heading, #ffffff);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tvs-tf-item:hover {
+  border-color: var(--tv-border-hover, #636363);
 }
 
 .tvm-dialog {
@@ -2692,13 +2739,39 @@
     font-size: 0.84rem;
   }
 
-  /* 6-Tab ChartSettingsModal compact mobile rows */
+  /* 6-Tab ChartSettingsModal & IndicatorSettingsModal compact mobile rows */
   .tvs-pane {
     padding: 10px 12px 20px;
+  }
+  .tvs-ind-tabs {
+    padding: 0 14px;
+    gap: 16px;
+  }
+  .tvs-tf-grid {
+    gap: 6px;
+  }
+  .tvs-tf-item {
+    padding: 7px 8px;
+    gap: 6px;
+    font-size: 0.78rem;
+  }
+  .tvs-tf-item .tvm-subtitle {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .tvs-row {
     flex-wrap: wrap;
     gap: 8px;
+  }
+  .tvs-ind-dialog .tvs-inline-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .tvs-ind-dialog .tvs-color-popover {
+    left: 0;
+    right: auto;
   }
   .tvs-select {
     min-width: 136px;

@@ -977,6 +977,83 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
   color: var(--sc-text-strong);
 }
 
+/* Floating "Torna al presente" (>>) Jump-to-Realtime Button */
+.sc-jump-realtime-btn {
+  position: absolute;
+  bottom: 38px;
+  z-index: 16;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--sc-border);
+  background: var(--sc-popup-bg);
+  color: var(--sc-text-strong);
+  box-shadow: var(--sc-shadow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+}
+.sc-jump-realtime-btn:hover {
+  background: var(--sc-brand);
+  border-color: var(--sc-brand);
+  color: #ffffff;
+  transform: scale(1.06);
+}
+
+/* Active Drawing Tool Mobile / Mid-Draft Hint Pill */
+.sc-tool-hint-pill {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 22;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 20px);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(19, 19, 19, 0.9);
+  border: 1px solid var(--sc-brand);
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 500;
+  box-shadow: var(--sc-shadow);
+  white-space: nowrap;
+}
+:root:not([data-theme='dark']) .sc-tool-hint-pill {
+  background: rgba(255, 255, 255, 0.95);
+  color: #131313;
+}
+.sc-tool-hint-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sc-tool-hint-primary {
+  font-weight: 600;
+}
+.sc-tool-hint-secondary {
+  opacity: 0.85;
+}
+.sc-tool-hint-cancel {
+  border: none;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(242, 54, 69, 0.2);
+  color: #f7525f;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.sc-tool-hint-cancel:hover {
+  background: #f23645;
+  color: #ffffff;
+}
+
 /* Floating Bar Replay Transport Bar */
 .sc-replay-bar {
   position: absolute;
@@ -1402,6 +1479,41 @@ html.theme-dark:not([data-theme='light']) .tv-supercharts {
     padding: 4px 7px;
     gap: 4px;
     font-size: 11px;
+  }
+
+  .sc-tool-hint-pill {
+    bottom: 34px;
+    max-width: calc(100% - 16px);
+    padding: 5px 9px;
+    border-radius: 12px;
+    white-space: normal;
+    line-height: 1.25;
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .sc-tool-hint-text {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: break-word;
+  }
+
+  .sc-tool-hint-sep {
+    display: none;
+  }
+
+  .sc-tool-hint-secondary {
+    font-size: 10px;
+    opacity: 0.78;
+  }
+
+  .sc-jump-realtime-btn--raised {
+    bottom: 84px;
   }
 }
 

@@ -20,6 +20,10 @@ export {
   type ChartSettingsModalProps,
 } from './ChartSettingsModal';
 export {
+  IndicatorSettingsModal,
+  type IndicatorSettingsModalProps,
+} from './IndicatorSettingsModal';
+export {
   ShortcutsModal,
   type ShortcutsModalProps,
 } from './ShortcutsModal';

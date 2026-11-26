@@ -15,6 +15,11 @@ import {
   type LineStyle,
 } from '../../types';
 import { useActivePane, useDrawings } from '../../store';
+import {
+  clampFloatingBarPosition,
+  useFloatingBarClearance,
+  type FloatingBarPosition,
+} from './FloatingFavoritesBar';
 import '../../styles/drawingTools.css';
 
 const TOOLBAR_POS_KEY = 'tv_it_drawing_toolbar_pos_v1';
@@ -140,17 +145,21 @@ export function toRgbaString(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${clampedAlpha})`;
 }
 
-interface ToolbarPos {
-  x: number;
-  y: number;
+function getDefaultToolbarPos(): FloatingBarPosition {
+  if (typeof window === 'undefined') return { x: 260, y: 94 };
+  const isMobile = window.innerWidth <= 900;
+  return {
+    x: isMobile ? 8 : Math.max(68, Math.round(window.innerWidth * 0.5 - 190)),
+    y: isMobile ? Math.max(180, Math.round(window.innerHeight - 160)) : 94,
+  };
 }
 
-function getInitialPos(): ToolbarPos {
-  if (typeof window === 'undefined') return { x: 260, y: 94 };
+function loadPersistedToolbarPos(): FloatingBarPosition | null {
+  if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(TOOLBAR_POS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<ToolbarPos>;
+      const parsed = JSON.parse(raw) as Partial<FloatingBarPosition>;
       if (
         typeof parsed?.x === 'number' &&
         Number.isFinite(parsed.x) &&
@@ -163,22 +172,7 @@ function getInitialPos(): ToolbarPos {
   } catch {
     // ignore storage errors
   }
-  const isNarrow = window.innerWidth <= 640;
-  const isMobile = window.innerWidth <= 900;
-  return {
-    x: isMobile ? 8 : Math.max(68, Math.round(window.innerWidth * 0.5 - 190)),
-    y: isNarrow ? 116 : 94,
-  };
-}
-
-function clampToolbarPos(pos: ToolbarPos, w: number, h: number): ToolbarPos {
-  if (typeof window === 'undefined') return pos;
-  const maxX = Math.max(8, window.innerWidth - w - 8);
-  const maxY = Math.max(44, window.innerHeight - h - 70);
-  return {
-    x: Math.max(8, Math.min(maxX, Math.round(pos.x))),
-    y: Math.max(44, Math.min(maxY, Math.round(pos.y))),
-  };
+  return null;
 }
 
 function LinePreview({
@@ -211,6 +205,8 @@ export function FloatingDrawingToolbar() {
   const {
     drawings,
     selectedDrawingId,
+    activeTool,
+    lockDrawings,
     updateDrawing,
     deleteDrawing,
     cloneDrawing,
@@ -224,16 +220,47 @@ export function FloatingDrawingToolbar() {
     [drawings, selectedDrawingId],
   );
 
+  const canonicalActiveTool = normalizeDrawingTool(activeTool);
+  const isSelectCursorMode =
+    canonicalActiveTool === 'crosshair' ||
+    canonicalActiveTool === 'dot' ||
+    canonicalActiveTool === 'arrow_cursor';
+  const isToolbarVisible = Boolean(drawing) && isSelectCursorMode;
+
   const barRef = useRef<HTMLDivElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const anchorBtnRef = useRef<HTMLElement | null>(null);
 
-  const [pos, setPos] = useState<ToolbarPos>(getInitialPos);
+  const [initialPersisted] = useState<FloatingBarPosition | null>(() =>
+    loadPersistedToolbarPos(),
+  );
+  const [hasSavedPos, setHasSavedPos] = useState<boolean>(
+    () => initialPersisted !== null,
+  );
+  const [pos, setPos] = useState<FloatingBarPosition>(
+    () => initialPersisted ?? getDefaultToolbarPos(),
+  );
   const [openPopover, setOpenPopover] = useState<PopoverKey | null>(null);
   const [popoverCoords, setPopoverCoords] = useState<{ top: number; left: number }>({
     top: 90,
     left: 260,
   });
+
+  const hasSavedPosRef = useRef(hasSavedPos);
+  hasSavedPosRef.current = hasSavedPos;
+
+  const { barSize, barSizeRef, obstructionTop, getLiveObstructionTop } =
+    useFloatingBarClearance(barRef, isToolbarVisible, 360, drawing?.type, () => {
+      if (!hasSavedPosRef.current) {
+        setPos(getDefaultToolbarPos());
+      }
+    });
+
+  useEffect(() => {
+    if (!isToolbarVisible) {
+      setOpenPopover(null);
+    }
+  }, [isToolbarVisible]);
 
   const dragRef = useRef<{
     pointerId: number;
@@ -241,32 +268,35 @@ export function FloatingDrawingToolbar() {
     offsetY: number;
   } | null>(null);
 
-  const clampAndSetPos = useCallback((next: ToolbarPos, persist = false) => {
-    const rect = barRef.current?.getBoundingClientRect();
-    const clamped = clampToolbarPos(next, rect?.width ?? 360, rect?.height ?? 38);
-    setPos(clamped);
-    if (persist && typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem(TOOLBAR_POS_KEY, JSON.stringify(clamped));
-      } catch {
-        // ignore storage errors
-      }
-    }
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!drawing) {
-      setOpenPopover(null);
-      return;
-    }
-    const sync = () => {
+  const clampAndSetPos = useCallback(
+    (next: FloatingBarPosition, persist = false) => {
       const rect = barRef.current?.getBoundingClientRect();
-      setPos((prev) => clampToolbarPos(prev, rect?.width ?? 360, rect?.height ?? 38));
-    };
-    sync();
-    window.addEventListener('resize', sync);
-    return () => window.removeEventListener('resize', sync);
-  }, [drawing, drawing?.type]);
+      const clamped = clampFloatingBarPosition(
+        next,
+        rect?.width ?? barSizeRef.current.w,
+        rect?.height ?? barSizeRef.current.h,
+        getLiveObstructionTop(),
+      );
+      setPos(clamped);
+      if (persist) {
+        setHasSavedPos(true);
+        if (typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem(TOOLBAR_POS_KEY, JSON.stringify(clamped));
+          } catch {
+            // ignore storage errors
+          }
+        }
+      }
+    },
+    [barSizeRef, getLiveObstructionTop],
+  );
+
+  const displayPos = useMemo(
+    () =>
+      clampFloatingBarPosition(pos, barSize.w, barSize.h, obstructionTop),
+    [pos, barSize.w, barSize.h, obstructionTop],
+  );
 
   const positionPopover = useCallback((anchor: HTMLElement | null) => {
     if (!anchor || typeof window === 'undefined') return;
@@ -361,7 +391,7 @@ export function FloatingDrawingToolbar() {
     };
   }, [clampAndSetPos]);
 
-  if (!drawing) return null;
+  if (!drawing || !isSelectCursorMode) return null;
 
   const canonicalType = normalizeDrawingTool(drawing.type);
   const toolMeta = DRAWING_TOOL_REGISTRY[canonicalType];
@@ -413,7 +443,7 @@ export function FloatingDrawingToolbar() {
         className="sc-float-draw-bar"
         role="toolbar"
         aria-label={`Barra strumenti ${toolMeta?.labelIt ?? 'disegno'}`}
-        style={{ left: pos.x, top: pos.y }}
+        style={{ left: displayPos.x, top: displayPos.y }}
       >
         {/* Drag grip */}
         <div
@@ -595,9 +625,11 @@ export function FloatingDrawingToolbar() {
         <button
           type="button"
           className="sc-fdt-btn sc-fdt-btn--danger"
-          title="Elimina (Canc)"
-          aria-label="Elimina disegno"
+          disabled={Boolean(drawing.locked || lockDrawings)}
+          title={drawing.locked || lockDrawings ? 'Sblocca il disegno prima di eliminarlo' : 'Elimina (Canc)'}
+          aria-label={drawing.locked || lockDrawings ? 'Sblocca il disegno prima di eliminarlo' : 'Elimina disegno'}
           onClick={() => {
+            if (drawing.locked || lockDrawings) return;
             setOpenPopover(null);
             deleteDrawing(activeSymbol.ticker, drawing.id);
           }}

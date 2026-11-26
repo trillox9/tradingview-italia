@@ -171,6 +171,9 @@ export interface RenderChartParams {
   executions?: PaperOrder[];
   alerts: AlertRule[];
   crosshair: CrosshairState;
+  syncedCrosshairTime?: number | null;
+  subPaneHeightRatio?: number;
+  subPaneSplitterHovered?: boolean;
   cursorMode?: CursorToolType;
   bidPrice?: number;
   askPrice?: number;
@@ -252,6 +255,39 @@ export function isPointInPriceAxis(
     x <= layout.priceAxisLeft + layout.priceAxisWidth &&
     y >= 0 &&
     y <= layout.timeAxisTop
+  );
+}
+
+export function isPointInMainPriceAxis(
+  x: number,
+  y: number,
+  layout: ChartLayoutMetrics,
+): boolean {
+  return isPointInPriceAxis(x, y, layout) && y <= layout.mainRect.bottom;
+}
+
+export function getSubPaneAtY(
+  y: number,
+  layout: ChartLayoutMetrics,
+): SubPaneLayout | null {
+  for (const sp of layout.subPanes) {
+    if (y >= sp.rect.top && y <= sp.rect.bottom) {
+      return sp;
+    }
+  }
+  return null;
+}
+
+export function isNearSubPaneSplitter(
+  x: number,
+  y: number,
+  layout: ChartLayoutMetrics,
+): boolean {
+  return (
+    layout.subPanes.length > 0 &&
+    Math.abs(y - layout.mainRect.bottom) <= 6 &&
+    x >= layout.plotLeft &&
+    x <= layout.plotRight
   );
 }
 
@@ -421,6 +457,7 @@ export function computeChartLayout(params: {
   topMarginPct?: number;
   bottomMarginPct?: number;
   scaleFontSize?: number;
+  subPaneHeightRatio?: number;
   overlaySeries: IndicatorSeries[];
   separateSeries: IndicatorSeries[];
   compareSeries: CompareSeriesData[];
@@ -440,6 +477,7 @@ export function computeChartLayout(params: {
     topMarginPct = 10,
     bottomMarginPct = 12,
     scaleFontSize = 11,
+    subPaneHeightRatio,
     overlaySeries,
     separateSeries,
     compareSeries,
@@ -462,11 +500,17 @@ export function computeChartLayout(params: {
 
   const usableHeight = Math.max(100, height - TIME_AXIS_HEIGHT);
   const subCount = separateSeries.length;
-  const maxSubTotal = Math.floor(usableHeight * 0.46);
-  const singleSubH =
-    subCount > 0
-      ? Math.max(68, Math.min(126, Math.floor(maxSubTotal / subCount)))
-      : 0;
+  let singleSubH = 0;
+  if (subCount > 0) {
+    if (typeof subPaneHeightRatio === 'number' && Number.isFinite(subPaneHeightRatio)) {
+      const clampedRatio = Math.max(0.12, Math.min(0.62, subPaneHeightRatio));
+      const targetTotal = Math.min(usableHeight - 90, Math.floor(usableHeight * clampedRatio));
+      singleSubH = Math.max(48, Math.floor(targetTotal / subCount));
+    } else {
+      const maxSubTotal = Math.floor(usableHeight * 0.46);
+      singleSubH = Math.max(68, Math.min(126, Math.floor(maxSubTotal / subCount)));
+    }
+  }
   const totalSubH = singleSubH * subCount;
   const mainH = Math.max(80, usableHeight - totalSubH);
 
@@ -876,6 +920,9 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     executions = [],
     alerts,
     crosshair,
+    syncedCrosshairTime = null,
+    subPaneHeightRatio,
+    subPaneSplitterHovered = false,
     cursorMode = 'crosshair',
     bidPrice,
     askPrice,
@@ -920,6 +967,7 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     topMarginPct: canvasCfg.topMarginPct,
     bottomMarginPct: Math.max(canvasCfg.bottomMarginPct, showVolume ? 12 : 4),
     scaleFontSize: canvasCfg.scaleFontSize,
+    subPaneHeightRatio,
     overlaySeries: visibleOverlays,
     separateSeries: visibleSeparates,
     compareSeries,
@@ -1823,18 +1871,27 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
   const scaleFontPx = Math.max(9, Math.min(14, canvasCfg.scaleFontSize || 11));
   const axisTextColor = canvasCfg.scaleTextColor || pal.axisText;
 
-  for (const sp of layout.subPanes) {
+  for (let spIdx = 0; spIdx < layout.subPanes.length; spIdx++) {
+    const sp = layout.subPanes[spIdx];
     const { series, rect, min, max } = sp;
     const valToSubY = (v: number) =>
       rect.bottom - ((v - min) / Math.max(1e-9, max - min)) * rect.height;
 
-    ctx.strokeStyle = pal.axisBorder;
-    ctx.lineWidth = 1;
+    const isPrimarySplitter = spIdx === 0 && subPaneSplitterHovered;
+    ctx.strokeStyle = isPrimarySplitter ? '#2962ff' : pal.axisBorder;
+    ctx.lineWidth = isPrimarySplitter ? 2 : 1;
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(0, Math.round(rect.top) + 0.5);
     ctx.lineTo(width, Math.round(rect.top) + 0.5);
     ctx.stroke();
+
+    if (isPrimarySplitter) {
+      const gx = layout.plotLeft + layout.plotWidth / 2;
+      ctx.fillStyle = '#2962ff';
+      drawRoundedRectPath(ctx, gx - 20, Math.round(rect.top) - 2, 40, 4, 2);
+      ctx.fill();
+    }
 
     ctx.save();
     ctx.beginPath();
@@ -1924,13 +1981,19 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
       }
     }
 
-    // Sub-pane Legend Title + Live Value
+    // Sub-pane Legend Title + Live Value (supports local hover AND multi-chart synced crosshair)
     const refIdx =
-      crosshair.visible &&
-      crosshair.barIndex >= 0 &&
-      crosshair.barIndex < rawCandles.length
-        ? crosshair.barIndex
-        : rawCandles.length - 1;
+      crosshair.visible && rawCandles.length > 0
+        ? Math.max(0, Math.min(rawCandles.length - 1, crosshair.barIndex))
+        : syncedCrosshairTime != null && rawCandles.length > 0
+          ? Math.max(
+              0,
+              Math.min(
+                rawCandles.length - 1,
+                Math.round(timeToIndex(syncedCrosshairTime, rawCandles)),
+              ),
+            )
+          : rawCandles.length - 1;
     let legendX = layout.plotLeft + 10;
     const legendY = rect.top + 13;
     ctx.font = `600 11px ${FONT_FAMILY}`;
@@ -2189,10 +2252,10 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
     crosshair.y >= 0 &&
     crosshair.y <= layout.timeAxisTop
   ) {
-    const snapX =
-      crosshair.barIndex >= 0 && crosshair.barIndex < candles.length
-        ? Math.round(indexToX(crosshair.barIndex, layout)) + 0.5
-        : Math.round(crosshair.x) + 0.5;
+    // Unclamped bar-slot snap (snaps cleanly to virtual future bar slots right of the latest candle!)
+    const snapX = Number.isFinite(crosshair.barIndex)
+      ? Math.round(indexToX(crosshair.barIndex, layout)) + 0.5
+      : Math.round(crosshair.x) + 0.5;
     const cy = Math.round(crosshair.y) + 0.5;
 
     if (cursorMode === 'crosshair') {
@@ -2333,6 +2396,54 @@ export function renderChart(params: RenderChartParams): ChartLayoutMetrics {
         radius: 12,
         price: yToPrice(plusY, layout),
       };
+    }
+  } else if (hasCandles && syncedCrosshairTime != null) {
+    // Synchronized vertical crosshair from a sibling pane in Multi-Chart layouts
+    const syncIdx = Math.round(timeToIndex(syncedCrosshairTime, rawCandles));
+    const syncX = Math.round(indexToX(syncIdx, layout)) + 0.5;
+    if (syncX >= layout.plotLeft && syncX <= layout.plotRight) {
+      ctx.save();
+      ctx.strokeStyle = canvasCfg.crosshairColor || pal.crosshair;
+      ctx.lineWidth = Math.max(0.75, canvasCfg.crosshairWidth || 1);
+      applyLineDash(ctx, canvasCfg.crosshairStyle);
+      ctx.beginPath();
+      ctx.moveTo(syncX, 0);
+      ctx.lineTo(syncX, layout.timeAxisTop);
+      ctx.stroke();
+      ctx.restore();
+
+      const syncTime = indexToTime(syncIdx, rawCandles);
+      const timeStr = formatAxisTime(
+        syncTime,
+        timeframe,
+        true,
+        scalesCfg.dateFormat,
+        symCfg.timezone,
+      );
+      ctx.font = `600 11px ${FONT_FAMILY}`;
+      const tw = ctx.measureText(timeStr).width + 16;
+      const pillX = Math.max(
+        layout.plotLeft + 2,
+        Math.min(layout.plotRight - tw - 2, syncX - tw / 2),
+      );
+      ctx.fillStyle = pal.pillBg;
+      drawRoundedRectPath(
+        ctx,
+        pillX,
+        layout.timeAxisTop + 3,
+        tw,
+        TIME_AXIS_HEIGHT - 6,
+        3,
+      );
+      ctx.fill();
+      ctx.fillStyle = pal.pillText;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        timeStr,
+        pillX + tw / 2,
+        layout.timeAxisTop + TIME_AXIS_HEIGHT / 2,
+      );
     }
   }
 

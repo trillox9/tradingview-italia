@@ -1,0 +1,272 @@
+/* ======================== SAVE LAYOUT SPLIT CONTROL & DROPDOWN ======================== */
+.sc-save-split {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  border-radius: 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 110ms ease, border-color 110ms ease;
+  flex-shrink: 0;
+}
+
+.sc-save-split:hover,
+.sc-save-split--open {
+  background: var(--sc-surface-hover);
+  border-color: var(--sc-border);
+}
+
+.sc-save-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 7px 0 8px;
+  border: none;
+  border-radius: 4px 0 0 4px;
+  background: transparent;
+  color: var(--sc-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  transition: color 110ms ease, background 110ms ease;
+}
+
+.sc-save-main:hover {
+  color: var(--sc-text-strong);
+}
+
+.sc-save-main--saved {
+  color: var(--sc-up, #089981);
+}
+
+.sc-save-name {
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-save-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sc-save-dirty-dot {
+  position: absolute;
+  top: -1px;
+  right: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sc-brand);
+  box-shadow: 0 0 0 1.5px var(--sc-bg);
+}
+
+.sc-save-split-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--sc-divider);
+  flex-shrink: 0;
+}
+
+.sc-save-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--sc-text-muted);
+  cursor: pointer;
+  transition: color 110ms ease, background 110ms ease;
+}
+
+.sc-save-caret:hover,
+.sc-save-split--open .sc-save-caret {
+  color: var(--sc-text-strong);
+  background: var(--sc-surface-active);
+}
+
+/* ======================== SAVE LAYOUT MENU ======================== */
+.sc-save-menu {
+  width: 282px;
+  max-width: calc(100vw - 12px);
+}
+
+.sc-save-status-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--sc-divider);
+  margin-bottom: 4px;
+}
+
+.sc-save-status-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sc-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-save-status-sub {
+  font-size: 11px;
+  color: var(--sc-text-muted);
+}
+
+.sc-save-status-sub--dirty {
+  color: var(--sc-brand);
+}
+
+.sc-save-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.sc-save-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--sc-brand);
+  background: var(--sc-bg);
+  color: var(--sc-text-strong);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.sc-save-rename-ok,
+.sc-save-rename-cancel {
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sc-save-rename-ok {
+  border: none;
+  background: var(--sc-brand);
+  color: #ffffff;
+}
+
+.sc-save-rename-ok:hover {
+  background: var(--sc-brand-hover);
+}
+
+.sc-save-rename-cancel {
+  border: 1px solid var(--sc-border);
+  background: transparent;
+  color: var(--sc-text);
+}
+
+.sc-save-layouts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 176px;
+  overflow-y: auto;
+}
+
+.sc-save-layout-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.sc-save-layout-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--sc-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sc-save-layout-pick:hover {
+  background: var(--sc-surface-hover);
+  color: var(--sc-text-strong);
+}
+
+.sc-save-layout-pick--active {
+  background: var(--sc-surface-active);
+  color: var(--sc-brand);
+  font-weight: 600;
+}
+
+.sc-save-layout-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-save-layout-meta {
+  font-size: 10.5px;
+  color: var(--sc-text-muted);
+  flex-shrink: 0;
+}
+
+.sc-save-layout-del {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sc-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sc-save-layout-del:hover {
+  background: var(--sc-surface-hover);
+  color: var(--sc-down, #f23645);
+}
+
+.sc-save-import-feedback {
+  margin: 4px 8px 2px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.sc-save-import-feedback--ok {
+  background: rgba(8, 153, 129, 0.14);
+  color: var(--sc-up, #089981);
+}
+
+.sc-save-import-feedback--err {
+  background: rgba(242, 54, 69, 0.14);
+  color: var(--sc-down, #f23645);
+}

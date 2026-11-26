@@ -22,6 +22,8 @@ import {
 } from '../src/engine';
 import {
   DEFAULT_FAVORITE_TOOLS,
+  DEFAULT_LAYOUT_ID,
+  DEFAULT_LAYOUT_NAME,
   INITIAL_REPLAY_STATE,
   LAYOUT_PANE_COUNTS,
   TradingViewProvider,
@@ -35,28 +37,40 @@ import {
   createDefaultPanes,
   deleteDrawingMutation,
   getVisibleBarCountForRange,
+  loadPersistedActivePaneIndex,
   loadPersistedActiveWatchlistId,
   loadPersistedChartSettings,
   loadPersistedDrawings,
   loadPersistedFavoriteTools,
+  loadPersistedLayoutMode,
+  loadPersistedLayoutsBundle,
+  loadPersistedPanes,
   loadPersistedShowFavoritesBar,
   loadPersistedTheme,
   loadPersistedWatchlists,
+  loadPersistedWorkspacePrefs,
   navigateTo,
   normalizeSymbolTicker,
+  parseImportedLayoutJson,
   parseRoute,
   redoDrawingMutation,
   removeSymbolFromWatchlistList,
   resolveInitialPaneSeriesState,
   resolveSymbolInfo,
+  savePersistedActivePaneIndex,
   savePersistedActiveWatchlistId,
   savePersistedChartSettings,
   savePersistedDrawings,
   savePersistedFavoriteTools,
+  savePersistedLayoutMode,
+  savePersistedLayoutsBundle,
+  savePersistedPanes,
   savePersistedShowFavoritesBar,
   savePersistedTheme,
   savePersistedWatchlists,
+  savePersistedWorkspacePrefs,
   sendDrawingToBackMutation,
+  serializeLayoutForExport,
   sliceCandlesForReplay,
   undoDrawingMutation,
   updateDrawingMutation,
@@ -69,6 +83,7 @@ import {
   useTradingView,
   useWatchlists,
   type DrawingsBundle,
+  type SavedChartLayout,
 } from '../src/store';
 
 function createMemoryStorage() {
@@ -329,6 +344,202 @@ describe('Store Pure Helpers, ChartSettings & Pro Drawing Mutations (src/store/s
     savePersistedActiveWatchlistId(list[1].id, mem);
     expect(loadPersistedActiveWatchlistId(list, mem)).toBe(list[1].id);
   });
+
+  it('persists full panes (including removed/edited indicators, timeframe, chartType, scale, layoutMode), normalized drawings, and workspace prefs cleanly across reload', () => {
+    const mem = createMemoryStorage();
+
+    // Build modified multi-chart panes: remove SMA from pane 0, add customized RSI, switch to 1H Heikin Ashi, compare ETHUSDT
+    const rsiPreset = DEFAULT_INDICATOR_PRESETS.find((p) => p.type === 'RSI')!;
+    const customRsi = {
+      ...rsiPreset,
+      id: 'rsi-custom-1',
+      params: { ...rsiPreset.params, period: 21 },
+      lineStyle: 'dashed' as const,
+      visibleTimeframes: ['1H', '4H', '1D'] as ('1H' | '4H' | '1D')[],
+    };
+
+    const panes = createDefaultPanes('BTCUSDT');
+    panes[0] = {
+      ...panes[0],
+      timeframe: '1H',
+      chartType: 'heikin_ashi',
+      indicators: [customRsi],
+      compareSymbols: ['ETHUSDT'],
+      scaleMode: 'log',
+      invertScale: true,
+      priceScalePosition: 'left',
+      autoScale: false,
+      lockPriceToBarRatio: true,
+    };
+    panes[1] = {
+      ...panes[1],
+      symbolId: 'NVDA',
+      timeframe: '15m',
+      indicators: [], // explicitly empty indicators must remain empty!
+    };
+
+    const settings = mergeChartSettings(getDefaultChartSettings('dark'), {
+      scales: {
+        mode: 'log',
+        invertScale: true,
+        position: 'left',
+        lockPriceToBarRatio: true,
+      },
+    });
+
+    savePersistedChartSettings(settings, mem);
+    savePersistedPanes(panes, mem);
+    savePersistedLayoutMode('2v', mem);
+    savePersistedActivePaneIndex(1, mem);
+
+    // Reload on root #/ (no explicit route symbol) -> restores BTCUSDT, 1H, heikin_ashi, custom RSI, empty pane 1 indicators, 2v layout
+    const reloadedSettings = loadPersistedChartSettings('dark', mem);
+    const reloadedPanes = loadPersistedPanes(undefined, reloadedSettings, mem);
+    expect(reloadedPanes[0].symbolId).toBe('BTCUSDT');
+    expect(reloadedPanes[0].timeframe).toBe('1H');
+    expect(reloadedPanes[0].chartType).toBe('heikin_ashi');
+    expect(reloadedPanes[0].indicators).toHaveLength(1);
+    expect(reloadedPanes[0].indicators[0].params.period).toBe(21);
+    expect(reloadedPanes[0].indicators[0].lineStyle).toBe('dashed');
+    expect(reloadedPanes[0].indicators[0].visibleTimeframes).toEqual(['1H', '4H', '1D']);
+    expect(reloadedPanes[0].compareSymbols).toEqual(['ETHUSDT']);
+    expect(reloadedPanes[0].scaleMode).toBe('log');
+    expect(reloadedPanes[0].invertScale).toBe(true);
+    expect(reloadedPanes[0].priceScalePosition).toBe('left');
+    expect(reloadedPanes[1].symbolId).toBe('NVDA');
+    expect(reloadedPanes[1].indicators).toEqual([]);
+    expect(loadPersistedLayoutMode(mem)).toBe('2v');
+    expect(loadPersistedActivePaneIndex('2v', mem)).toBe(1);
+
+    // Reload on explicit #/chart/RACE -> overrides ONLY pane 0 symbol while preserving persisted timeframe/indicators/settings
+    const routeOverridePanes = loadPersistedPanes('MIL:RACE', reloadedSettings, mem);
+    expect(routeOverridePanes[0].symbolId).toBe('RACE');
+    expect(routeOverridePanes[0].timeframe).toBe('1H');
+    expect(routeOverridePanes[0].indicators).toHaveLength(1);
+
+    // ChartSettings vs panes[0] desync prevention when only chartSettings existed in storage
+    const onlySettingsMem = createMemoryStorage();
+    savePersistedChartSettings(settings, onlySettingsMem);
+    const syncedDefaults = loadPersistedPanes(
+      undefined,
+      loadPersistedChartSettings('dark', onlySettingsMem),
+      onlySettingsMem,
+    );
+    expect(syncedDefaults[0].invertScale).toBe(true);
+    expect(syncedDefaults[0].priceScalePosition).toBe('left');
+    expect(syncedDefaults[0].scaleMode).toBe('log');
+
+    // Normalized drawings key loading merges qualified & canonical keys cleanly
+    const rawDrawing: DrawingObject = {
+      id: 'drw-norm-1',
+      symbol: 'MIL:RACE',
+      type: 'hline',
+      points: [{ time: 1000, price: 440 }],
+      style: { color: '#2962FF', lineWidth: 2, lineStyle: 'solid' },
+      locked: false,
+      visible: true,
+      createdAt: 1,
+    };
+    savePersistedDrawings(
+      {
+        'MIL:RACE': [rawDrawing],
+        RACE: [rawDrawing, { ...rawDrawing, id: 'drw-norm-2' }],
+      },
+      mem,
+    );
+    const loadedDrawings = loadPersistedDrawings(mem);
+    expect(Object.keys(loadedDrawings)).toEqual(['RACE']);
+    expect(loadedDrawings.RACE).toHaveLength(2);
+    expect(loadedDrawings.RACE[0].symbol).toBe('RACE');
+
+    // Workspace prefs (magnet, stayInDrawing, lock, hideMode, custom Pine, bottomPanelHeight, liveCrypto)
+    savePersistedWorkspacePrefs(
+      {
+        magnetMode: 'strong',
+        stayInDrawingMode: true,
+        lockDrawings: true,
+        hideMode: 'drawings',
+        pineCode: '//@version=5\nindicator("Custom", overlay=true)\nplot(ta.ema(close, 9))',
+        pineAppliedToChart: true,
+        bottomPanelHeight: 360,
+        liveCryptoEnabled: false,
+      },
+      mem,
+    );
+    const prefs = loadPersistedWorkspacePrefs(mem);
+    expect(prefs.magnetMode).toBe('strong');
+    expect(prefs.stayInDrawingMode).toBe(true);
+    expect(prefs.lockDrawings).toBe(true);
+    expect(prefs.hideMode).toBe('drawings');
+    expect(prefs.pineCode).toContain('ta.ema(close, 9)');
+    expect(prefs.pineAppliedToChart).toBe(true);
+    expect(prefs.bottomPanelHeight).toBe(360);
+    expect(prefs.liveCryptoEnabled).toBe(false);
+
+    // Indicator visibleTimeframes filtering & lineStyle propagation
+    const btcCandles = getCandlesForSymbol('BTCUSDT', '1D', 120);
+    const shownOn1H = computePaneIndicatorSeries(btcCandles, [customRsi], null, '1H');
+    expect(shownOn1H).toHaveLength(1);
+    expect(shownOn1H[0].plots[0].lineStyle).toBe('dashed');
+    const hiddenOn5m = computePaneIndicatorSeries(btcCandles, [customRsi], null, '5m');
+    expect(hiddenOn5m).toHaveLength(0);
+  });
+
+  it('persists named SavedChartLayouts and supports clean JSON export/import validation', () => {
+    const mem = createMemoryStorage();
+    const darkSettings = getDefaultChartSettings('dark');
+    const fallbackLayout: SavedChartLayout = {
+      id: DEFAULT_LAYOUT_ID,
+      name: DEFAULT_LAYOUT_NAME,
+      updatedAt: 1700000000000,
+      layoutMode: '1',
+      activePaneIndex: 0,
+      panes: createDefaultPanes('FTSEMIB'),
+      chartSettings: darkSettings,
+      drawingsBySymbol: {},
+      pineCode: PINE_TEMPLATES[0].code,
+      pineAppliedToChart: false,
+    };
+
+    const customLayout: SavedChartLayout = {
+      ...fallbackLayout,
+      id: 'layout-swing-pro',
+      name: 'Swing Italia Pro',
+      layoutMode: '2h',
+      panes: createDefaultPanes('RACE'),
+    };
+
+    savePersistedLayoutsBundle(
+      {
+        savedLayouts: [customLayout, fallbackLayout],
+        activeLayoutId: 'layout-swing-pro',
+        autoSave: false,
+        lastSavedAt: 1700000050000,
+      },
+      mem,
+    );
+
+    const loaded = loadPersistedLayoutsBundle(fallbackLayout, 'dark', mem);
+    expect(loaded.savedLayouts).toHaveLength(2);
+    expect(loaded.activeLayoutId).toBe('layout-swing-pro');
+    expect(loaded.autoSave).toBe(false);
+    expect(loaded.savedLayouts[0].name).toBe('Swing Italia Pro');
+
+    // JSON Export -> Import round-trip
+    const exportedJson = serializeLayoutForExport(customLayout);
+    const imported = parseImportedLayoutJson(exportedJson, 'dark');
+    expect(imported.ok).toBe(true);
+    if (imported.ok) {
+      expect(imported.layout.name).toBe('Swing Italia Pro');
+      expect(imported.layout.layoutMode).toBe('2h');
+      expect(imported.layout.panes[0].symbolId).toBe('RACE');
+      expect(imported.layout.id).not.toBe(customLayout.id);
+    }
+
+    // Invalid JSON cleanly rejected
+    expect(parseImportedLayoutJson('{broken', 'dark').ok).toBe(false);
+    expect(parseImportedLayoutJson('{"hello":"world"}', 'dark').ok).toBe(false);
+  });
 });
 
 describe('TradingViewProvider & React Hooks (src/store/TradingViewContext.tsx)', () => {
@@ -363,6 +574,24 @@ describe('TradingViewProvider & React Hooks (src/store/TradingViewContext.tsx)',
         favoriteToolsCount: drawingsCtx.favoriteTools.length,
         showFavoritesBar: drawingsCtx.showFavoritesBar,
         hideMode: drawingsCtx.hideMode,
+        activeLayoutName: tv.activeLayoutName,
+        autoSave: tv.autoSave,
+        hasUnsavedChanges: tv.hasUnsavedChanges,
+        savedLayoutsCount: tv.savedLayouts.length,
+        editingIndicatorId: tv.editingIndicatorId,
+        paneIndicatorsCount: paneCtx.indicators.length,
+        hasLayoutAndIndicatorApis:
+          typeof tv.saveCurrentLayout === 'function' &&
+          typeof tv.setAutoSave === 'function' &&
+          typeof tv.renameActiveLayout === 'function' &&
+          typeof tv.duplicateActiveLayout === 'function' &&
+          typeof tv.loadSavedLayout === 'function' &&
+          typeof tv.deleteSavedLayout === 'function' &&
+          typeof tv.createNewLayout === 'function' &&
+          typeof tv.exportLayoutJson === 'function' &&
+          typeof tv.importLayoutJson === 'function' &&
+          typeof tv.openIndicatorSettings === 'function' &&
+          typeof tv.closeIndicatorSettings === 'function',
         hasProDrawingActions:
           typeof drawingsCtx.cloneDrawing === 'function' &&
           typeof drawingsCtx.bringToFront === 'function' &&
@@ -413,6 +642,13 @@ describe('TradingViewProvider & React Hooks (src/store/TradingViewContext.tsx)',
     expect(data.favoriteToolsCount).toBe(DEFAULT_FAVORITE_TOOLS.length);
     expect(data.showFavoritesBar).toBe(false);
     expect(data.hideMode).toBe('none');
+    expect(data.activeLayoutName).toBe(DEFAULT_LAYOUT_NAME);
+    expect(data.autoSave).toBe(true);
+    expect(data.hasUnsavedChanges).toBe(false);
+    expect(data.savedLayoutsCount).toBe(1);
+    expect(data.editingIndicatorId).toBeNull();
+    expect(data.paneIndicatorsCount).toBe(1);
+    expect(data.hasLayoutAndIndicatorApis).toBe(true);
     expect(data.hasProDrawingActions).toBe(true);
     expect(data.paperBalance).toBe(100_000);
     expect(data.alertsCount).toBe(0);

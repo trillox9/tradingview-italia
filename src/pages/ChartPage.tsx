@@ -32,7 +32,13 @@ import {
 } from '../components/panels';
 
 export function ChartPage() {
-  const { openModal, rightPanel } = useTradingView();
+  const {
+    openModal,
+    rightPanel,
+    toggleRightPanel,
+    activeLayoutName,
+    saveCurrentLayout,
+  } = useTradingView();
   const {
     activePane,
     activePaneIndex,
@@ -227,6 +233,13 @@ export function ChartPage() {
           target.tagName === 'SELECT' ||
           target.isContentEditable);
 
+      if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+        ev.preventDefault();
+        saveCurrentLayout();
+        showNotify(`Layout "${activeLayoutName}" salvato`);
+        return;
+      }
+
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
         ev.preventDefault();
         openModal('symbolSearch');
@@ -276,6 +289,9 @@ export function ChartPage() {
         } else if (k === 'r') {
           ev.preventDefault();
           handleResetView();
+        } else if (k === 'd') {
+          ev.preventDefault();
+          toggleRightPanel('data');
         } else if (k === 'i') {
           ev.preventDefault();
           toggleInvertScale(activePaneIndex);
@@ -313,14 +329,58 @@ export function ChartPage() {
           ev.preventDefault();
           openModal('alert');
         }
-      } else if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key === '?') {
-        openModal('shortcuts');
+        return;
+      }
+
+      if (!ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        if (ev.shiftKey && ev.key.toLowerCase() === 'f') {
+          ev.preventDefault();
+          if (typeof document !== 'undefined') {
+            try {
+              if (document.fullscreenElement) {
+                void document.exitFullscreen?.();
+              } else {
+                void document.documentElement.requestFullscreen?.();
+              }
+            } catch {
+              // Ignore fullscreen API restrictions
+            }
+          }
+        } else if (ev.key === '?') {
+          openModal('shortcuts');
+        } else if (ev.key === '/') {
+          ev.preventDefault();
+          openModal('symbolSearch');
+        } else if (ev.key === '+' || ev.key === '=') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-zoom-in'));
+        } else if (ev.key === '-') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-zoom-out'));
+        } else if (ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent('tv-chart-pan-left', { detail: { fast: ev.shiftKey } }),
+          );
+        } else if (ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          window.dispatchEvent(
+            new CustomEvent('tv-chart-pan-right', { detail: { fast: ev.shiftKey } }),
+          );
+        } else if (ev.key === 'Home') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-jump-start'));
+        } else if (ev.key === 'End') {
+          ev.preventDefault();
+          window.dispatchEvent(new CustomEvent('tv-chart-jump-end'));
+        }
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    activeLayoutName,
     activePane.scaleMode,
     activePaneIndex,
     activeSymbol.ticker,
@@ -331,11 +391,14 @@ export function ChartPage() {
     lockDrawings,
     openModal,
     redo,
+    saveCurrentLayout,
     selectedDrawingId,
     setActiveTool,
     setHideDrawings,
     setScaleMode,
+    showNotify,
     toggleInvertScale,
+    toggleRightPanel,
     undo,
   ]);
 

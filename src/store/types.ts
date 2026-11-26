@@ -86,6 +86,19 @@ export interface ChartPaneState {
   rangePreset: RangePreset;
 }
 
+export interface SavedChartLayout {
+  id: string;
+  name: string;
+  updatedAt: number;
+  layoutMode: LayoutMode;
+  activePaneIndex: number;
+  panes: ChartPaneState[];
+  chartSettings: ChartSettings;
+  drawingsBySymbol: Record<string, DrawingObject[]>;
+  pineCode: string;
+  pineAppliedToChart: boolean;
+}
+
 export interface ReplayState {
   active: boolean;
   /** Inclusive 0-based index of the last revealed candle bar */
@@ -136,6 +149,28 @@ export interface TradingViewStateContextValue {
   chartSettings: ChartSettings;
   updateChartSettings: (patch: ChartSettingsPatch) => void;
   resetChartSettings: () => void;
+
+  // Named Chart Layouts & Salva / Auto-Save Engine
+  savedLayouts: SavedChartLayout[];
+  activeLayoutId: string;
+  activeLayoutName: string;
+  autoSave: boolean;
+  hasUnsavedChanges: boolean;
+  lastSavedAt: number | null;
+  saveCurrentLayout: () => void;
+  setAutoSave: (enabled: boolean) => void;
+  renameActiveLayout: (name: string) => void;
+  duplicateActiveLayout: (name?: string) => void;
+  loadSavedLayout: (id: string) => void;
+  deleteSavedLayout: (id: string) => void;
+  createNewLayout: (name?: string) => void;
+  exportLayoutJson: () => string;
+  importLayoutJson: (json: string) => { ok: boolean; error?: string };
+
+  // Indicator Settings Modal State
+  editingIndicatorId: string | null;
+  openIndicatorSettings: (indicatorId: string) => void;
+  closeIndicatorSettings: () => void;
 
   // Routing
   route: AppRoute;

@@ -120,55 +120,62 @@ export function DataWindowPanel({
               Nessun indicatore applicato al pannello attivo.
             </div>
           ) : (
-            indicatorSeries.map((series) => (
-              <div key={series.id} style={{ marginBottom: 10 }}>
-                <div
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 700,
-                    color: 'var(--tv-text-heading, #fff)',
-                    marginBottom: 4,
-                  }}
-                >
-                  {series.title}
+            indicatorSeries.map((series) => {
+              const valuePrecision =
+                series.pane === 'overlay' ? activeSymbol.precision : 2;
+              return (
+                <div key={series.id} style={{ marginBottom: 10 }}>
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: 'var(--tv-text-heading, #fff)',
+                      marginBottom: 4,
+                    }}
+                  >
+                    {series.title}
+                  </div>
+                  {series.plots.map((plot) => {
+                    const pt =
+                      plot.data[resolvedIndex] ?? plot.data[plot.data.length - 1];
+                    const val = pt?.value;
+                    return (
+                      <div key={plot.key} className="tv-kv-row">
+                        <span className="tv-kv-key">
+                          <span
+                            className="tv-color-dot"
+                            style={{ backgroundColor: plot.color }}
+                          />
+                          {plot.label}
+                        </span>
+                        <span className="tv-kv-val">
+                          {val !== null && val !== undefined
+                            ? series.type === 'VOLUME'
+                              ? formatVolume(val)
+                              : formatPrice(val, valuePrecision)
+                            : 'n/d'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {series.plots.length === 0 &&
+                    series.hlines?.slice(0, 5).map((hl, i) => (
+                      <div key={`${series.id}-hl-${i}`} className="tv-kv-row">
+                        <span className="tv-kv-key">
+                          <span
+                            className="tv-color-dot"
+                            style={{ backgroundColor: hl.color }}
+                          />
+                          {hl.label ?? 'Livello'}
+                        </span>
+                        <span className="tv-kv-val">
+                          {formatPrice(hl.value, valuePrecision)}
+                        </span>
+                      </div>
+                    ))}
                 </div>
-                {series.plots.map((plot) => {
-                  const pt = plot.data[resolvedIndex] ?? plot.data[plot.data.length - 1];
-                  const val = pt?.value;
-                  return (
-                    <div key={plot.key} className="tv-kv-row">
-                      <span className="tv-kv-key">
-                        <span
-                          className="tv-color-dot"
-                          style={{ backgroundColor: plot.color }}
-                        />
-                        {plot.label}
-                      </span>
-                      <span className="tv-kv-val">
-                        {val !== null && val !== undefined
-                          ? formatPrice(val, activeSymbol.precision)
-                          : 'n/d'}
-                      </span>
-                    </div>
-                  );
-                })}
-                {series.plots.length === 0 &&
-                  series.hlines?.slice(0, 5).map((hl, i) => (
-                    <div key={`${series.id}-hl-${i}`} className="tv-kv-row">
-                      <span className="tv-kv-key">
-                        <span
-                          className="tv-color-dot"
-                          style={{ backgroundColor: hl.color }}
-                        />
-                        {hl.label ?? 'Livello'}
-                      </span>
-                      <span className="tv-kv-val">
-                        {formatPrice(hl.value, activeSymbol.precision)}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>

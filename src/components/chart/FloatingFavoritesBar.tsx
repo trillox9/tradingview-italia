@@ -12,19 +12,19 @@ import {
   normalizeDrawingTool,
   type CanonicalDrawingToolType,
 } from '../../types';
-import { useDrawings } from '../../store';
+import { useDrawings, useTradingView } from '../../store';
 import { DrawingToolIcon } from './DrawingToolbar';
 import '../../styles/drawingTools.css';
 
 const STORAGE_KEY = 'tv_it_favorites_bar_pos_v1';
 
-interface BarPosition {
+export interface FloatingBarPosition {
   x: number;
   y: number;
 }
 
-function loadInitialPosition(): BarPosition {
-  const defaultPos = (): BarPosition => {
+function loadInitialPosition(): FloatingBarPosition {
+  const defaultPos = (): FloatingBarPosition => {
     if (typeof window === 'undefined') return { x: 68, y: 140 };
     const isMobile = window.innerWidth <= 900;
     return {
@@ -37,7 +37,7 @@ function loadInitialPosition(): BarPosition {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultPos();
-    const parsed = JSON.parse(raw) as Partial<BarPosition>;
+    const parsed = JSON.parse(raw) as Partial<FloatingBarPosition>;
     if (
       typeof parsed?.x === 'number' &&
       Number.isFinite(parsed.x) &&
@@ -52,13 +52,132 @@ function loadInitialPosition(): BarPosition {
   return defaultPos();
 }
 
-function clampPosition(pos: BarPosition, barW: number, barH: number): BarPosition {
+export function measureBottomObstructionTop(): number | null {
+  if (typeof document === 'undefined') return null;
+  let minTop = Number.POSITIVE_INFINITY;
+  for (const selector of ['.sc-bottom-bar', '.tv-bottom-drawer']) {
+    const el = document.querySelector(selector);
+    if (!el) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.height > 0 && rect.top > 44) {
+      minTop = Math.min(minTop, rect.top);
+    }
+  }
+  return Number.isFinite(minTop) ? Math.round(minTop) : null;
+}
+
+export function clampFloatingBarPosition(
+  pos: FloatingBarPosition,
+  barW: number,
+  barH: number,
+  obstructionTop?: number | null,
+): FloatingBarPosition {
   if (typeof window === 'undefined') return pos;
   const maxX = Math.max(8, window.innerWidth - barW - 8);
-  const maxY = Math.max(44, window.innerHeight - barH - 70);
+  const defaultMaxY = window.innerHeight - barH - 70;
+  const clearanceMaxY =
+    obstructionTop != null ? obstructionTop - barH - 8 : defaultMaxY;
+  const maxY = Math.max(44, Math.min(defaultMaxY, clearanceMaxY));
   return {
     x: Math.max(8, Math.min(maxX, Math.round(pos.x))),
     y: Math.max(44, Math.min(maxY, Math.round(pos.y))),
+  };
+}
+
+/**
+ * Tracks a floating toolbar's rendered size and the live top edge of
+ * `.sc-bottom-bar` / `.tv-bottom-drawer` so the bar clears the bottom drawer
+ * cleanly whenever it opens, resizes, or expands, and returns on collapse.
+ */
+export function useFloatingBarClearance(
+  barRef: { current: HTMLDivElement | null },
+  isVisible: boolean,
+  defaultWidth: number,
+  contentKey?: string | number,
+  onWindowResize?: () => void,
+) {
+  const { bottomPanel, bottomPanelExpanded, bottomPanelHeight } = useTradingView();
+  const [viewportH, setViewportH] = useState<number>(() =>
+    typeof window === 'undefined' ? 800 : window.innerHeight,
+  );
+  const [barSize, setBarSize] = useState<{ w: number; h: number }>({
+    w: defaultWidth,
+    h: 38,
+  });
+  const [measuredTop, setMeasuredTop] = useState<number | null>(null);
+
+  const effectiveDrawerHeight = bottomPanel
+    ? bottomPanelExpanded
+      ? Math.round(viewportH * 0.56)
+      : bottomPanelHeight
+    : 0;
+  const fallbackTop = viewportH - (bottomPanel ? effectiveDrawerHeight + 78 : 78);
+  const obstructionTop = measuredTop ?? fallbackTop;
+
+  const obstructionTopRef = useRef(obstructionTop);
+  obstructionTopRef.current = obstructionTop;
+  const barSizeRef = useRef(barSize);
+  barSizeRef.current = barSize;
+  const onWindowResizeRef = useRef(onWindowResize);
+  onWindowResizeRef.current = onWindowResize;
+
+  useLayoutEffect(() => {
+    if (!isVisible) return;
+    const syncMetrics = (fromResize: boolean) => {
+      if (typeof window !== 'undefined') {
+        setViewportH((prev) =>
+          prev === window.innerHeight ? prev : window.innerHeight,
+        );
+      }
+      const rect = barRef.current?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        const nextW = Math.round(rect.width);
+        const nextH = Math.round(rect.height);
+        setBarSize((prev) =>
+          prev.w === nextW && prev.h === nextH ? prev : { w: nextW, h: nextH },
+        );
+      }
+      const nextTop = measureBottomObstructionTop();
+      setMeasuredTop((prev) => (prev === nextTop ? prev : nextTop));
+      if (fromResize) {
+        onWindowResizeRef.current?.();
+      }
+    };
+    const handleResize = () => syncMetrics(true);
+    const handleObserve = () => syncMetrics(false);
+    syncMetrics(false);
+    window.addEventListener('resize', handleResize);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(handleObserve);
+      for (const selector of ['.sc-bottom-bar', '.tv-bottom-drawer']) {
+        const el = document.querySelector(selector);
+        if (el) ro.observe(el);
+      }
+    }
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      ro?.disconnect();
+    };
+  }, [
+    barRef,
+    isVisible,
+    contentKey,
+    bottomPanel,
+    bottomPanelExpanded,
+    bottomPanelHeight,
+  ]);
+
+  const getLiveObstructionTop = useCallback(
+    () => measureBottomObstructionTop() ?? obstructionTopRef.current,
+    [],
+  );
+
+  return {
+    barSize,
+    barSizeRef,
+    obstructionTop,
+    getLiveObstructionTop,
   };
 }
 
@@ -71,7 +190,8 @@ export function FloatingFavoritesBar() {
   } = useDrawings();
 
   const barRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<BarPosition>(loadInitialPosition);
+  const [position, setPosition] = useState<FloatingBarPosition>(loadInitialPosition);
+
   const dragRef = useRef<{
     pointerId: number;
     offsetX: number;
@@ -95,34 +215,37 @@ export function FloatingFavoritesBar() {
   }, [favoriteTools]);
 
   const isVisible = showFavoritesBar && visibleTools.length > 0;
+  const { barSize, barSizeRef, obstructionTop, getLiveObstructionTop } =
+    useFloatingBarClearance(barRef, isVisible, 280, visibleTools.length);
 
-  const clampAndCommit = useCallback((nextPos: BarPosition, persist = false) => {
-    const rect = barRef.current?.getBoundingClientRect();
-    const w = rect?.width ?? 280;
-    const h = rect?.height ?? 38;
-    const clamped = clampPosition(nextPos, w, h);
-    setPosition(clamped);
-    if (persist && typeof window !== 'undefined') {
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clamped));
-      } catch {
-        // ignore storage failures
+  const clampAndCommit = useCallback(
+    (nextPos: FloatingBarPosition, persist = false) => {
+      const rect = barRef.current?.getBoundingClientRect();
+      const w = rect?.width ?? barSizeRef.current.w;
+      const h = rect?.height ?? barSizeRef.current.h;
+      const clamped = clampFloatingBarPosition(
+        nextPos,
+        w,
+        h,
+        getLiveObstructionTop(),
+      );
+      setPosition(clamped);
+      if (persist && typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clamped));
+        } catch {
+          // ignore storage failures
+        }
       }
-    }
-  }, []);
+    },
+    [barSizeRef, getLiveObstructionTop],
+  );
 
-  useLayoutEffect(() => {
-    if (!isVisible) return;
-    const syncClamp = () => {
-      setPosition((prev) => {
-        const rect = barRef.current?.getBoundingClientRect();
-        return clampPosition(prev, rect?.width ?? 280, rect?.height ?? 38);
-      });
-    };
-    syncClamp();
-    window.addEventListener('resize', syncClamp);
-    return () => window.removeEventListener('resize', syncClamp);
-  }, [isVisible, visibleTools.length]);
+  const displayPosition = useMemo(
+    () =>
+      clampFloatingBarPosition(position, barSize.w, barSize.h, obstructionTop),
+    [position, barSize.w, barSize.h, obstructionTop],
+  );
 
   const handleGripPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.pointerType === 'mouse') return;
@@ -179,8 +302,8 @@ export function FloatingFavoritesBar() {
       role="toolbar"
       aria-label="Barra strumenti di disegno preferiti"
       style={{
-        left: position.x,
-        top: position.y,
+        left: displayPosition.x,
+        top: displayPosition.y,
       }}
     >
       <div

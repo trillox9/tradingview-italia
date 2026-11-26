@@ -19,20 +19,39 @@ interface ShortcutGroup {
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
-    title: 'Zoom, Assi e Gestures',
+    title: 'Layout, Ricerca e Finestre',
     items: [
-      { keys: ['Rotella su Asse Prezzi'], label: 'Zoom verticale (disattiva Auto)' },
-      { keys: ['Rotella su Asse Tempo'], label: 'Zoom orizzontale' },
+      { keys: ['Ctrl', 'S'], label: 'Salva layout grafico' },
+      { keys: ['Ctrl', 'K'], label: 'Ricerca simboli globale' },
+      { keys: ['/'], label: 'Ricerca simboli rapida' },
+      { keys: ['Alt', 'D'], label: 'Apri/chiudi Finestra dati' },
+      { keys: ['Shift', 'F'], label: 'Schermo intero' },
+      { keys: ['?'], label: 'Scorciatoie da tastiera' },
+      { keys: ['Esc'], label: 'Mirino / Annulla / Chiudi finestra' },
+    ],
+  },
+  {
+    title: 'Zoom, Assi e Navigazione',
+    items: [
+      { keys: ['+'], label: 'Zoom avanti sul grafico' },
+      { keys: ['-'], label: 'Zoom indietro sul grafico' },
+      { keys: ['←', '→'], label: 'Scorri barre (Shift per scorrere veloce)' },
+      { keys: ['Home'], label: 'Vai all’inizio dello storico' },
+      { keys: ['End'], label: 'Torna al presente (ultima barra)' },
+      { keys: ['Rotella Asse Prezzi'], label: 'Zoom verticale (disattiva Auto)' },
+      { keys: ['Rotella Asse Tempo'], label: 'Zoom orizzontale' },
       { keys: ['Doppio clic Asse'], label: 'Ripristina scala automatica (Auto)' },
-      { keys: ['Alt', 'R'], label: 'Reset vista grafico' },
+      { keys: ['Alt', 'R'], label: 'Ripristina vista grafico' },
       { keys: ['Alt', 'I'], label: 'Inverti scala prezzi' },
       { keys: ['Alt', 'L'], label: 'Scala logaritmica' },
       { keys: ['Alt', 'P'], label: 'Scala percentuale (%)' },
     ],
   },
   {
-    title: 'Strumenti di Disegno',
+    title: 'Strumenti di Disegno e Misura',
     items: [
+      { keys: ['Shift', 'Clic'], label: 'Misura rapida sul grafico' },
+      { keys: ['Ctrl'], label: 'Calamita temporanea (tieni premuto)' },
       { keys: ['Alt', 'T'], label: 'Linea di tendenza (Trendline)' },
       { keys: ['Alt', 'H'], label: 'Linea orizzontale' },
       { keys: ['Alt', 'V'], label: 'Linea verticale' },
@@ -45,20 +64,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
-    title: 'Ricerca, Avvisi e Azioni',
+    title: 'Avvisi, Istantanea e Timeframe',
     items: [
-      { keys: ['Ctrl', 'K'], label: 'Ricerca simboli globale' },
-      { keys: ['/'], label: 'Cerca simbolo rapido' },
-      { keys: ['?'], label: 'Apri scorciatoie da tastiera' },
-      { keys: ['Esc'], label: 'Mirino / Chiudi finestra' },
       { keys: ['Alt', 'A'], label: 'Crea nuovo avviso sul simbolo' },
       { keys: ['Alt', 'S'], label: 'Istantanea del grafico (PNG)' },
-      { keys: ['↑', '↓'], label: 'Naviga risultati ricerca' },
-    ],
-  },
-  {
-    title: 'Timeframe Grafico',
-    items: [
       { keys: ['1'], label: 'Timeframe 1 minuto (1m)' },
       { keys: ['2'], label: 'Timeframe 5 minuti (5m)' },
       { keys: ['3'], label: 'Timeframe 15 minuti (15m)' },
@@ -113,7 +122,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
             <div>
               <h2 className="tvm-title">Scorciatoie da tastiera</h2>
               <div className="tvm-subtitle">
-                Gestures assi, strumenti di disegno e comandi rapidi Supercharts
+                Layout, zoom, gestures assi, strumenti di disegno e comandi rapidi Supercharts
               </div>
             </div>
           </div>
@@ -135,7 +144,7 @@ export function ShortcutsModal({ isOpen, onClose }: ShortcutsModalProps) {
               className="tvm-search-input"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filtra scorciatoie (es. Trendline, Scala, Rotella, Fibonacci)..."
+              placeholder="Filtra scorciatoie (es. Salva, Zoom, Calamita, Misura, Fibonacci)..."
               autoFocus
             />
             {query && (

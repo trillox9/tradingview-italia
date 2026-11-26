@@ -7,6 +7,7 @@ import { IndicatorsModal } from './IndicatorsModal';
 import { CompareSymbolModal } from './CompareSymbolModal';
 import { CreateAlertModal } from './CreateAlertModal';
 import { ChartSettingsModal } from './ChartSettingsModal';
+import { IndicatorSettingsModal } from './IndicatorSettingsModal';
 import { ShortcutsModal } from './ShortcutsModal';
 import { SnapshotModal } from './SnapshotModal';
 
@@ -24,11 +25,14 @@ export function ModalHost() {
     modals,
     openModal,
     closeAllModals,
+    editingIndicatorId,
+    closeIndicatorSettings,
     setActiveTool,
     setTimeframe,
   } = useTradingView();
 
-  const anyModalOpen = Object.values(modals).some(Boolean);
+  const anyModalOpen =
+    Object.values(modals).some(Boolean) || editingIndicatorId !== null;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -45,6 +49,11 @@ export function ModalHost() {
 
       // Escape closes any open modal, or resets chart tool to crosshair
       if (key === 'Escape') {
+        if (editingIndicatorId !== null) {
+          e.preventDefault();
+          closeIndicatorSettings();
+          return;
+        }
         if (anyModalOpen) {
           e.preventDefault();
           closeAllModals();
@@ -108,6 +117,8 @@ export function ModalHost() {
   }, [
     anyModalOpen,
     closeAllModals,
+    closeIndicatorSettings,
+    editingIndicatorId,
     openModal,
     route.view,
     setActiveTool,
@@ -121,6 +132,7 @@ export function ModalHost() {
       {modals.compare && <CompareSymbolModal />}
       {modals.alert && <CreateAlertModal />}
       {modals.settings && <ChartSettingsModal />}
+      {editingIndicatorId !== null && <IndicatorSettingsModal />}
       {modals.shortcuts && <ShortcutsModal />}
       {modals.snapshot && <SnapshotModal />}
     </>

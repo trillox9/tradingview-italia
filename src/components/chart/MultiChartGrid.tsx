@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import type { Candle } from '../../types';
 import {
   LAYOUT_PANE_COUNTS,
@@ -47,6 +48,36 @@ export function MultiChartGrid({
   const visiblePanes = panes.slice(0, visibleCount);
   const isMultiChart = visibleCount > 1;
 
+  // Multi-chart synchronized timestamp crosshair across all visible sibling panes
+  const [syncedCrosshair, setSyncedCrosshair] = useState<{
+    timestamp: number | null;
+    sourcePaneIndex: number;
+  }>({ timestamp: null, sourcePaneIndex: -1 });
+
+  useEffect(() => {
+    if (!isMultiChart) {
+      setSyncedCrosshair({ timestamp: null, sourcePaneIndex: -1 });
+    }
+  }, [isMultiChart]);
+
+  const handleCrosshairTimeChange = useCallback(
+    (paneIndex: number, timestamp: number | null) => {
+      if (!isMultiChart) return;
+      setSyncedCrosshair((prev) => {
+        if (timestamp === null) {
+          return prev.sourcePaneIndex === paneIndex
+            ? { timestamp: null, sourcePaneIndex: -1 }
+            : prev;
+        }
+        if (prev.timestamp === timestamp && prev.sourcePaneIndex === paneIndex) {
+          return prev;
+        }
+        return { timestamp, sourcePaneIndex: paneIndex };
+      });
+    },
+    [isMultiChart],
+  );
+
   return (
     <div
       className={`sc-multichart-grid sc-multichart-grid--${layoutMode}`}
@@ -70,6 +101,16 @@ export function MultiChartGrid({
             idx === activePaneIndex ? onZoomHistoryChange : undefined
           }
           hideInlineDrawingBar={hideInlineDrawingBar}
+          syncedCrosshairTime={
+            isMultiChart && syncedCrosshair.sourcePaneIndex !== idx
+              ? syncedCrosshair.timestamp
+              : null
+          }
+          onCrosshairTimeChange={
+            isMultiChart
+              ? (ts) => handleCrosshairTimeChange(idx, ts)
+              : undefined
+          }
         />
       ))}
     </div>
